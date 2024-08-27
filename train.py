@@ -71,6 +71,7 @@ class TransferModel(nn.Module):
 
         for param in self.model.parameters():
             param.requires_grad = False
+        
         self.model.ln_final.requires_grad_ = True
 
         image_features = self.model.encode_image(image)
@@ -96,33 +97,36 @@ image_size = 224
 mean = (0.485, 0.456, 0.406)
 std = (0.229, 0.224, 0.225)
 
-train_transform = transforms.Compose([
-    transforms.Resize(image_size),
-    transforms.RandomCrop(image_size),
-    transforms.RandomHorizontalFlip(p=0.5),
-    transforms.ColorJitter(),
-    transforms.ToTensor(),
-    transforms.Normalize(
-        mean=torch.tensor(mean),
-        std=torch.tensor(std))
-])
+train_dataset = TrainDataset('data/vqa_v2','train')
+val_dataset = TrainDataset('data/vqa_v2','val','VQAv2')
+train_targ_dataset = TestDataset('data/test/images', 'data/test/train_questions.csv')
+test_targ_dataset = TestDataset('data/test/images', 'data/test/test_questions.csv')
 
-test_transform = transforms.Compose([
-            transforms.Resize(image_size),
-            transforms.CenterCrop(image_size),
-            transforms.ToTensor(),
-            transforms.Normalize(
-                mean=torch.tensor(mean),
-                std=torch.tensor(std))
-        ])
-
-train_dataset = TrainDataset('data/vqa_v2','train', transform=train_transform)
-val_dataset = TrainDataset('data/vqa_v2','val','VQAv2',transform=test_transform)
-# cross_dataset = TestDataset('/raid/biplab/hassan/datasets/vqa_v2','val','VQAv2',transform=test_transform)
-
-train_loader = DataLoader(train_dataset, num_workers=num_workers, batch_size=batch_size, shuffle=False)
+train_loader = DataLoader(train_dataset, num_workers=num_workers, batch_size=batch_size*0.75, shuffle=False)
+train_targ_loader = DataLoader(train_targ_dataset, num_workers=num_workers, batch_size=batch_size*0.25, shuffle=False)
 val_loader = DataLoader(val_dataset, num_workers=num_workers, batch_size=batch_size, shuffle=False)
 # cross_loader = DataLoader(cross_dataset, num_workers=num_workers, batch_size=batch_size, shuffle=False)
+
+train_loader_itr = iter(train_loader)
+train_targ_loader_itr = iter(train_targ_loader)
+
+def mixed_data_loader(loader1, loader2):
+    while True:
+        try:
+            batch1 = next(loader1)
+        except StopIteration:
+            loader1_iter = iter(loader1)
+            batch1 = next(loader1)
+        
+        try:
+            batch2 = next(loader2)
+        except StopIteration:
+            loader2_iter = iter(loader2)
+            batch2 = next(loader2)
+        
+        yield batch1 + batch2
+
+mixed_loader = mixed_data_loader(train_loader_itr, train_targ_loader_itr)
 
 transfer_model = TransferModel()
 
@@ -144,17 +148,22 @@ for i in range(epochs):
     transfer_model.train()
     train_loss_meter.reset()
     train_accuracy_meter.reset()
-    for data in tqdm(train_loader):
+    for data in tqdm(mixed_loader):
         img = data["img"]
         ques = data["question"]
         ans = data["answer"]
+        domain = data["domain"]
         img,ans = img.to('cuda'),ans.to('cuda')
 
-        output = transfer_model(img,ques)
+        output = transfer_model(img, ques, domain)
         # print(output.shape)
         # print(ans.shape)
         # print(ans)
-        loss =  torch.nn.CrossEntropyLoss()(output,ans)
+        if (domain == "source"):
+            loss =  torch.nn.CrossEntropyLoss()(output,ans)
+        else:
+            loss =  torch.nn.CrossEntropyLoss()(output, output)
+            
         train_loss_meter.update(loss.item(), img.size(0))
         # Calculate and update accuracy
         acc1 = accuracy(output, ans, topk=(1,))

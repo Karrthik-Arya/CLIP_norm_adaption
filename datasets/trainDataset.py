@@ -117,7 +117,7 @@ class TrainDataset(Dataset):
         image_path = os.path.expanduser(os.path.join(self.root, image_path))
         img = Image.open(image_path).convert('RGB')
         answer = torch.tensor(self.vocab[selected_answers])
-        return {"img": img, "question": question, "answer": answer}
+        return {"img": img, "question": question, "answer": answer, "domain": "source"}
     
     def __len__(self):
         return len(self.df["answers"])

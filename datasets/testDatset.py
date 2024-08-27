@@ -7,10 +7,11 @@ from PIL import Image
 # weights = [1/answer_counts[i] for i in test_df['answer'].values]
 
 class TestDataset(Dataset):
-    def __init__(self, path):
-        df = pd.read_csv(f'{path}/questions.csv')
+    def __init__(self, img_path, questions_path):
+        df = pd.read_csv(questions_path)
         self.question = df['question']
         self.image_id = df['image']
+        self.img_path = img_path
         self.vocab={}
         i=0
         with open('common_vocab.txt', 'r') as file:
@@ -33,5 +34,5 @@ class TestDataset(Dataset):
         ques = self.question.iloc[index]
         answer = self.answer.iloc[index]
         image_id = self.image_id.iloc[index]
-        img = Image.open(f'test_data/images/{image_id}').convert('RGB')
-        return {"img": img, "question": ques, "answer": answer}
+        img = Image.open(f'f{self.img_path}/{image_id}').convert('RGB')
+        return {"img": img, "question": ques, "answer": answer, "domain": "target"}
