@@ -8,6 +8,7 @@ from torchvision import transforms
 from torchvision.transforms.functional import InterpolationMode
 from torch.utils.data import DataLoader
 from torch.optim import SGD,AdamW
+import torch.nn.functional as F
 from datasets.trainDataset import TrainDataset
 from datasets.testDatset import TestDataset
 from tqdm import tqdm
@@ -44,7 +45,16 @@ def accuracy(output, target, topk=(1,)):
             correct_k = correct[:k].view(-1).float().sum(0, keepdim=True)
             res.append(correct_k.mul_(100.0 / batch_size))
         return res
-    
+
+ln_outputs = {}
+ln_inputs = {}
+def source_hook(module, input, output):
+    ln_outputs["source"] = output.detach()
+    ln_inputs["source"] = input.detach()
+
+def target_hook(module, input, output):
+    ln_outputs["target"] = output.detach()
+    ln_inputs["target"] = input.detach()
 
 class TransferModel(nn.Module):
     def __init__(self,num_classes=1000):
@@ -54,6 +64,9 @@ class TransferModel(nn.Module):
 
         self.source_ln = copy.deepcopy(self.model.ln_final)
         self.target_ln = copy.deepcopy(self.model.ln_final)
+
+        self.source_ln.register_forward_hook(source_hook)
+        self.target_ln.register_forward_hook(target_hook)
 
         self.source_ln.requires_grad_ = True
         self.target_ln.requires_grad_ = True
@@ -76,6 +89,11 @@ class TransferModel(nn.Module):
 
         image_features = self.model.encode_image(image)
         text_features = self.model.encode_text(inputs)
+
+        if(domain == 'source'):
+            self.target_ln(ln_inputs[domain])
+        else:
+            self.source_ln(ln_inputs[domain])
 
         # print(multimodal_emb.shape)
         multi_modal = torch.cat((image_features,text_features),dim=1)
@@ -159,10 +177,14 @@ for i in range(epochs):
         # print(output.shape)
         # print(ans.shape)
         # print(ans)
+        cosine_sim = F.cosine_similarity(ln_outputs['source'], ln_outputs['target'])
+        cosine_loss = -cosine_sim.mean()
         if (domain == "source"):
             loss =  torch.nn.CrossEntropyLoss()(output,ans)
         else:
             loss =  torch.nn.CrossEntropyLoss()(output, output)
+        
+        loss += cosine_loss
             
         train_loss_meter.update(loss.item(), img.size(0))
         # Calculate and update accuracy
