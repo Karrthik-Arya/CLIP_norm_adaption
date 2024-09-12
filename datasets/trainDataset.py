@@ -95,7 +95,7 @@ class TrainDataset(Dataset):
                 selected_answer = preprocessing(selected_answer)
                 if selected_answer not in self.vocab.keys():
                     indices.append(i)
-                    print(selected_answer)
+                    # print(selected_answer)
         df_annotations.drop(indices,axis=0,inplace=True)
         df_annotations.reset_index(inplace=True,drop=True) 
         #    print(df_annotations)
@@ -112,7 +112,7 @@ class TrainDataset(Dataset):
     def __getitem__(self, index):
         image_path = self.df["image_path"][index]
         question = self.df["question"][index]
-        selected_answers = self.selection(self.df["answers"][index])
+        selected_answers = preprocessing(self.selection(self.df["answers"][index]))
        
         image_path = os.path.expanduser(os.path.join(self.root, image_path))
         img = Image.open(image_path).convert('RGB')
