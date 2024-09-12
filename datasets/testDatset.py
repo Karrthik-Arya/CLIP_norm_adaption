@@ -39,4 +39,4 @@ class TestDataset(Dataset):
         image_path = os.path.expanduser(os.path.join(self.img_path, image_path))
         img = Image.open(image_path).convert('RGB')
         answer = torch.tensor(self.vocab[selected_answer])
-        return {"img": img, "question": question, "answer": answer, "domain": "source"}
+        return {"img": img, "question": question, "answer": answer, "domain": "target"}
