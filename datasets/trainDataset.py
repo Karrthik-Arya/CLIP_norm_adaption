@@ -65,7 +65,7 @@ class TrainDataset(Dataset):
             "img_folder": "val2014"
         }
     }
-    def __init__(self, root, subset, transform):
+    def __init__(self, root, subset, transform=None):
         self.subset = subset
         self.root = root
         self.transform = transform
