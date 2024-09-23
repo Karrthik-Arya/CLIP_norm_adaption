@@ -74,7 +74,7 @@ class TransferModel(nn.Module):
         self.classifier = nn.Linear(1024,num_classes)
     @torch.autocast(device_type="cuda")
     def forward(self, image, text, domain):
-        image = self.preprocess(image).unsqueeze(0).to(self.device)
+        # image = self.preprocess(image).unsqueeze(0).to(self.device)
         inputs = clip.tokenize(text).to(self.device)
 
         if(domain == 'source'):

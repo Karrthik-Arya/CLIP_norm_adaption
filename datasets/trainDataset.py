@@ -8,12 +8,14 @@ import torch.nn.functional as F
 import numpy as np
 import re
 from tqdm import tqdm
+import clip
 
 def most_common_from_dict(dct):
     lst = [x["answer"] for x in dct]
     return max(set(lst), key=lst.count)
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
+model, preprocess = clip.load("ViT-B/32", device=device)
 
 def preprocessing(text):
   input_text = text
@@ -116,6 +118,7 @@ class TrainDataset(Dataset):
        
         image_path = os.path.expanduser(os.path.join(self.root, image_path))
         img = Image.open(image_path).convert('RGB')
+        img = preprocess(img)
         answer = torch.tensor(self.vocab[selected_answers])
         return {"img": img, "question": question, "answer": answer, "domain": "source"}
     

@@ -3,10 +3,14 @@ from torch.utils.data import Dataset
 from PIL import Image
 import os
 import torch
+import clip
 
 # test_df = 
 # answer_counts = test_df['answer'].value_counts()
 # weights = [1/answer_counts[i] for i in test_df['answer'].values]
+
+device = "cuda" if torch.cuda.is_available() else "cpu"
+model, preprocess = clip.load("ViT-B/32", device=device)
 
 class TestDataset(Dataset):
     def __init__(self, img_path, questions_path):
@@ -38,5 +42,6 @@ class TestDataset(Dataset):
        
         image_path = os.path.expanduser(os.path.join(self.img_path, image_path))
         img = Image.open(image_path).convert('RGB')
+        img = preprocess(img)
         answer = torch.tensor(self.vocab[selected_answer])
         return {"img": img, "question": question, "answer": answer, "domain": "target"}
