@@ -145,7 +145,7 @@ def mixed_data_loader(loader1, loader2):
         mixed_batch = {
             "img": torch.cat((batch1["img"], batch2["img"]), dim=0),
             "question": batch1["question"] + batch2["question"],  
-            "answer": batch1["answer"] + batch2["answer"],       
+            "answer": torch.cat(batch1["answer"], batch2["answer"], dim=0),       
             "domain": batch1["domain"] + batch2["domain"]    
         }
         
