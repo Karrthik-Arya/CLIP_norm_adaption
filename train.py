@@ -90,6 +90,8 @@ class TransferModel(nn.Module):
         image_features = self.model.encode_image(image)
         text_features = self.model.encode_text(inputs)
 
+        print(domain)
+
         if(domain == 'source'):
             self.target_ln(ln_inputs[domain])
         else:
