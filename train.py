@@ -142,9 +142,14 @@ def mixed_data_loader(loader1, loader2):
             loader2_iter = iter(loader2)
             batch2 = next(loader2)
 
-        print(batch1)
+        mixed_batch = {
+            "img": torch.cat((batch1["img"], batch2["img"]), dim=0),
+            "question": batch1["question"] + batch2["question"],  
+            "answer": batch1["answer"] + batch2["answer"],       
+            "domain": batch1["domain"] + batch2["domain"]    
+        }
         
-        yield batch1 + batch2
+        yield mixed_batch
 
 mixed_loader = mixed_data_loader(train_loader_itr, train_targ_loader_itr)
 
