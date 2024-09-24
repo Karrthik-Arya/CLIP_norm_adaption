@@ -50,11 +50,11 @@ ln_outputs = {}
 ln_inputs = {}
 def source_hook(module, input, output):
     ln_outputs["source"] = output.detach()
-    ln_inputs["source"] = input.detach()
+    ln_inputs["source"] = tuple(i.detach() for i in input)
 
 def target_hook(module, input, output):
     ln_outputs["target"] = output.detach()
-    ln_inputs["target"] = input.detach()
+    ln_inputs["target"] = tuple(i.detach() for i in input)
 
 class TransferModel(nn.Module):
     def __init__(self,num_classes=1000):
