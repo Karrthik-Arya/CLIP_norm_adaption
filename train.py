@@ -72,7 +72,7 @@ class TransferModel(nn.Module):
         self.target_ln.requires_grad_ = True
 
         self.classifier = nn.Linear(1024,num_classes)
-    @torch.autocast(device_type="cuda:1")
+    @torch.autocast(device_type="cuda")
     def forward(self, image, text, domain):
         # image = self.preprocess(image).unsqueeze(0).to(self.device)
         inputs = clip.tokenize(text).to(self.device)
