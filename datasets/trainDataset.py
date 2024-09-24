@@ -79,7 +79,7 @@ class TrainDataset(Dataset):
 
         df = pd.DataFrame(data["questions"])
         df["image_path"] = df["image_id"].apply(
-                lambda x: f"COCO_{self.IMAGE_PATH[subset]["img_folder"]}_{x:012d}.jpg")
+                lambda x: f"{self.IMAGE_PATH[subset]["img_folder"]}/COCO_{self.IMAGE_PATH[subset]["img_folder"]}_{x:012d}.jpg")
         path = os.path.expanduser(os.path.join(root, self.IMAGE_PATH[subset]['answers']))
         with open(path, 'r') as f:
                     data = json.load(f)
