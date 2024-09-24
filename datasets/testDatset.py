@@ -9,7 +9,7 @@ import clip
 # answer_counts = test_df['answer'].value_counts()
 # weights = [1/answer_counts[i] for i in test_df['answer'].values]
 
-device = "cuda" if torch.cuda.is_available() else "cpu"
+device = "cuda:1" if torch.cuda.is_available() else "cpu"
 model, preprocess = clip.load("ViT-B/32", device=device)
 
 class TestDataset(Dataset):

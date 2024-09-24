@@ -59,7 +59,7 @@ def target_hook(module, input, output):
 class TransferModel(nn.Module):
     def __init__(self,num_classes=1000):
         super(TransferModel, self).__init__()
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        self.device = "cuda:1" if torch.cuda.is_available() else "cpu"
         self.model, self.preprocess = clip.load("ViT-B/32", device=self.device)
 
         self.source_ln = copy.deepcopy(self.model.ln_final)
@@ -72,7 +72,7 @@ class TransferModel(nn.Module):
         self.target_ln.requires_grad_ = True
 
         self.classifier = nn.Linear(1024,num_classes)
-    @torch.autocast(device_type="cuda")
+    @torch.autocast(device_type="cuda:1")
     def forward(self, image, text, domain):
         # image = self.preprocess(image).unsqueeze(0).to(self.device)
         inputs = clip.tokenize(text).to(self.device)
@@ -148,7 +148,7 @@ mixed_loader = mixed_data_loader(train_loader_itr, train_targ_loader_itr)
 
 transfer_model = TransferModel()
 
-transfer_model = transfer_model.to('cuda')
+transfer_model = transfer_model.to('cuda:1')
 optimizer = AdamW(transfer_model.parameters(), lr=lr)
 
 optimizer.zero_grad()
@@ -171,7 +171,7 @@ for i in range(epochs):
         ques = data["question"]
         ans = data["answer"]
         domain = data["domain"]
-        img,ans = img.to('cuda'),ans.to('cuda')
+        img,ans = img.to('cuda:1'),ans.to('cuda:1')
 
         output = transfer_model(img, ques, domain)
         # print(output.shape)
@@ -201,7 +201,7 @@ for i in range(epochs):
         img = data["img"]
         ques = data["question"]
         ans = data["answer"]
-        img,ans = img.to('cuda'),ans.to('cuda')
+        img,ans = img.to('cuda:1'),ans.to('cuda:1')
 
         output = transfer_model(img,ques)
         loss =  torch.nn.CrossEntropyLoss()(output,ans)

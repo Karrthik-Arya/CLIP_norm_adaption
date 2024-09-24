@@ -14,7 +14,7 @@ def most_common_from_dict(dct):
     lst = [x["answer"] for x in dct]
     return max(set(lst), key=lst.count)
 
-device = "cuda" if torch.cuda.is_available() else "cpu"
+device = "cuda:1" if torch.cuda.is_available() else "cpu"
 model, preprocess = clip.load("ViT-B/32", device=device)
 
 def preprocessing(text):
