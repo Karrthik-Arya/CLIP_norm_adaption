@@ -141,6 +141,8 @@ def mixed_data_loader(loader1, loader2):
         except StopIteration:
             loader2_iter = iter(loader2)
             batch2 = next(loader2)
+
+        print(batch1)
         
         yield batch1 + batch2
 
