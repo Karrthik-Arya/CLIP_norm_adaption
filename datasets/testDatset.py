@@ -44,4 +44,4 @@ class TestDataset(Dataset):
         img = Image.open(image_path).convert('RGB')
         img = preprocess(img)
         answer = torch.tensor(self.vocab[selected_answer])
-        return {"img": img, "question": question, "answer": answer, "domain": "target"}
+        return {"img": img, "question": question, "answer": answer}

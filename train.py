@@ -46,15 +46,13 @@ def accuracy(output, target, topk=(1,)):
             res.append(correct_k.mul_(100.0 / batch_size))
         return res
 
-ln_outputs = {}
-ln_inputs = {}
-def source_hook(module, input, output):
-    ln_outputs["source"] = output.detach()
-    ln_inputs["source"] = tuple(i.detach() for i in input)
+ln_params = {}
+
+def source_hook(module: nn.LayerNorm, input, output):
+    ln_params["source"] = torch.cat((module.weight.data.clone(), module.bias.data.clone()), dim=0)
 
 def target_hook(module, input, output):
-    ln_outputs["target"] = output.detach()
-    ln_inputs["target"] = tuple(i.detach() for i in input)
+    ln_params["target"] = torch.cat((module.weight.data.clone(), module.bias.data.clone()), dim=0)
 
 class TransferModel(nn.Module):
     def __init__(self,num_classes=1000):
@@ -68,34 +66,35 @@ class TransferModel(nn.Module):
         self.source_ln.register_forward_hook(source_hook)
         self.target_ln.register_forward_hook(target_hook)
 
+        for param in self.model.parameters():
+            param.requires_grad = False
+
         self.source_ln.requires_grad_ = True
         self.target_ln.requires_grad_ = True
 
+        self.source_model = copy.deepcopy(self.model)
+        self.source_model.ln_final = self.source_ln
+
+        self.target_model = copy.deepcopy(self.model)
+        self.target_model.ln_final = self.target_ln
+
         self.classifier = nn.Linear(1024,num_classes)
+
     @torch.autocast(device_type="cuda")
-    def forward(self, image, text, domain):
-        # image = self.preprocess(image).unsqueeze(0).to(self.device)
-        inputs = clip.tokenize(text).to(self.device)
+    def forward(self, image, text):
 
-        if(domain == 'source'):
-            self.model.ln_final = self.source_ln
-        else:
-            self.model.ln_final = self.target_ln
+        inputs1 = clip.tokenize(text["source"]).to(self.device)
+        image_features1 = self.source_model.encode_image(image["source"])
+        text_features1 = self.source_model.encode_text(inputs1)
 
-        for param in self.model.parameters():
-            param.requires_grad = False
-        
-        self.model.ln_final.requires_grad_ = True
 
-        image_features = self.model.encode_image(image)
-        text_features = self.model.encode_text(inputs)
+        inputs2 = clip.tokenize(text["target"]).to(self.device)
+        image_features2 = self.target_model.encode_image(image["target"])
+        text_features2 = self.target_model.encode_text(inputs2)
 
-        print(domain)
 
-        if(domain == 'source'):
-            self.target_ln(ln_inputs[domain])
-        else:
-            self.source_ln(ln_inputs[domain])
+        image_features = torch.cat((image_features1, image_features2), dim=0)
+        text_features = torch.cat((text_features1, text_features2), dim=0)
 
         # print(multimodal_emb.shape)
         multi_modal = torch.cat((image_features,text_features),dim=1)
@@ -135,25 +134,20 @@ def mixed_data_loader(loader1, loader2):
         try:
             batch1 = next(loader1)
         except StopIteration:
-            loader1_iter = iter(loader1)
-            batch1 = next(loader1)
+            break
         
         try:
             batch2 = next(loader2)
         except StopIteration:
-            loader2_iter = iter(loader2)
-            batch2 = next(loader2)
+            break
 
         mixed_batch = {
-            "img": torch.cat((batch1["img"], batch2["img"]), dim=0),
-            "question": batch1["question"] + batch2["question"],  
-            "answer": torch.cat((batch1["answer"], batch2["answer"]), dim=0),       
-            "domain": batch1["domain"] + batch2["domain"]    
+            "img": {"source": batch1["img"], "target": batch2["img"]},
+            "question": {"source": batch1["question"], "target":batch2["question"]},  
+            "answer": torch.cat((batch1["answer"], batch2["answer"]), dim=0),          
         }
         
         yield mixed_batch
-
-mixed_loader = mixed_data_loader(train_loader_itr, train_targ_loader_itr)
 
 transfer_model = TransferModel()
 
@@ -175,24 +169,23 @@ for i in range(epochs):
     transfer_model.train()
     train_loss_meter.reset()
     train_accuracy_meter.reset()
+    mixed_loader = mixed_data_loader(train_loader_itr, train_targ_loader_itr)
+
     for data in tqdm(mixed_loader):
         img = data["img"]
         ques = data["question"]
         ans = data["answer"]
-        domain = data["domain"]
         img,ans = img.to('cuda:1'),ans.to('cuda:1')
 
-        output = transfer_model(img, ques, domain)
+        output = transfer_model(img, ques)
         # print(output.shape)
         # print(ans.shape)
         # print(ans)
-        cosine_sim = F.cosine_similarity(ln_outputs['source'], ln_outputs['target'])
+        cosine_sim = F.cosine_similarity(ln_params['source'], ln_params['target'])
         cosine_loss = -cosine_sim.mean()
-        if (domain == "source"):
-            loss =  torch.nn.CrossEntropyLoss()(output,ans)
-        else:
-            loss =  torch.nn.CrossEntropyLoss()(output, output)
-        
+
+        loss =  torch.nn.CrossEntropyLoss()(output[:len(ques['source'])],ans[:len(ques['source'])])
+        loss +=  torch.nn.CrossEntropyLoss()(output[len(ques['source']):], output[len(ques['source']):])
         loss += cosine_loss
             
         train_loss_meter.update(loss.item(), img.size(0))
