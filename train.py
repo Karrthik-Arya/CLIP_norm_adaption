@@ -175,7 +175,7 @@ for i in range(epochs):
         img = data["img"]
         ques = data["question"]
         ans = data["answer"]
-        img,ans = img.to('cuda:1'),ans.to('cuda:1')
+        
 
         output = transfer_model(img, ques)
         # print(output.shape)
