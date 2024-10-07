@@ -84,12 +84,12 @@ class TransferModel(nn.Module):
     def forward(self, image, text):
 
         inputs1 = clip.tokenize(text["source"]).to(self.device)
-        image_features1 = self.source_model.encode_image(image["source"])
+        image_features1 = self.source_model.encode_image(image["source"].to(self.device))
         text_features1 = self.source_model.encode_text(inputs1)
 
 
         inputs2 = clip.tokenize(text["target"]).to(self.device)
-        image_features2 = self.target_model.encode_image(image["target"])
+        image_features2 = self.target_model.encode_image(image["target"].to(self.device))
         text_features2 = self.target_model.encode_text(inputs2)
 
 
@@ -174,7 +174,7 @@ for i in range(epochs):
     for data in tqdm(mixed_loader):
         img = data["img"]
         ques = data["question"]
-        ans = data["answer"]
+        ans = data["answer"].to('cuda:1')
         
 
         output = transfer_model(img, ques)
