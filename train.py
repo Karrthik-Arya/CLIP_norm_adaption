@@ -188,10 +188,10 @@ for i in range(epochs):
         loss +=  torch.nn.CrossEntropyLoss()(output[len(ques['source']):], output[len(ques['source']):])
         loss += cosine_loss
             
-        train_loss_meter.update(loss.item(), img.size(0))
+        train_loss_meter.update(loss.item(), ans.size(0))
         # Calculate and update accuracy
         acc1 = accuracy(output, ans, topk=(1,))
-        train_accuracy_meter.update(acc1[0].item(), img.size(0))
+        train_accuracy_meter.update(acc1[0].item(), ans.size(0))
         loss.backward()
         optimizer.step()
         optimizer.zero_grad()
