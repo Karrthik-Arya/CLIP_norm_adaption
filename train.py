@@ -203,8 +203,7 @@ for i in range(epochs):
         img = data["img"]
         ques = data["question"]
         ans = data["answer"]
-        img,ans = img.to('cuda:1'), ans.to('cuda:1')
-        img =  {"source": img, "target": []},
+        img =  {"source": img, "target": []}
         ques = {"source": ques, "target": []}
 
         output = transfer_model(img,ques)
