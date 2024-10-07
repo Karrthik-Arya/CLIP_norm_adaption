@@ -205,7 +205,7 @@ for i in range(epochs):
         ans = data["answer"]
         img,ans = img.to('cuda:1'), ans.to('cuda:1')
         img =  {"source": img, "target": []},
-        question = {"source": ques, "target": []}
+        ques = {"source": ques, "target": []}
 
         output = transfer_model(img,ques)
         loss =  torch.nn.CrossEntropyLoss()(output,ans)
