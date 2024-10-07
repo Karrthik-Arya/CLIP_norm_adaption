@@ -83,13 +83,13 @@ class TransferModel(nn.Module):
     @torch.autocast(device_type="cuda")
     def forward(self, image, text):
 
-        inputs1 = clip.tokenize(text["source"]).to(self.device)
-        image_features1 = self.source_model.encode_image(image["source"].to(self.device))
+        inputs1 = clip.tokenize(text.get("source", torch.tensor([]))).to(self.device)
+        image_features1 = self.source_model.encode_image(image.get("source", torch.tensor([])).to(self.device))
         text_features1 = self.source_model.encode_text(inputs1)
 
 
-        inputs2 = clip.tokenize(text["target"]).to(self.device)
-        image_features2 = self.target_model.encode_image(image["target"].to(self.device))
+        inputs2 = clip.tokenize(text.get("target", torch.tensor([]))).to(self.device)
+        image_features2 = self.target_model.encode_image(image.get("target", torch.tensor([])).to(self.device))
         text_features2 = self.target_model.encode_text(inputs2)
 
 
@@ -203,8 +203,8 @@ for i in range(epochs):
         img = data["img"]
         ques = data["question"]
         ans = data["answer"]
-        img =  {"source": img, "target": []}
-        ques = {"source": ques, "target": []}
+        img =  {"source": img}
+        ques = {"source": ques}
 
         output = transfer_model(img,ques)
         loss =  torch.nn.CrossEntropyLoss()(output,ans)
