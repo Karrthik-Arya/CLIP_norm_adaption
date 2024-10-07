@@ -181,6 +181,7 @@ for i in range(epochs):
         # print(output.shape)
         # print(ans.shape)
         # print(ans)
+        print(ln_params['source'].shape, ln_params['target'].shape)
         cosine_sim = F.cosine_similarity(ln_params['source'], ln_params['target'])
         cosine_loss = -cosine_sim.mean()
 
