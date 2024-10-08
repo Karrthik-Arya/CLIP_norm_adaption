@@ -197,6 +197,7 @@ for i in range(epochs):
         loss += cosine_loss
             
         train_loss_meter.update(loss.item(), ans.size(0))
+        print(train_loss_meter.avg)
         # Calculate and update accuracy
         acc1 = accuracy(output, ans, topk=(1,))
         train_accuracy_meter.update(acc1[0].item(), ans.size(0))
