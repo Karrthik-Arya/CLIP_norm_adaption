@@ -95,7 +95,6 @@ class TransferModel(nn.Module):
             text_features2 = self.target_model.encode_text(inputs2)
 
         if ("source" in text) and ("target" in text):
-            print("both")
             image_features = torch.cat((image_features1, image_features2), dim=0)
             text_features = torch.cat((text_features1, text_features2), dim=0)
         elif "source" in text:
@@ -112,7 +111,6 @@ class TransferModel(nn.Module):
         multi_modal = torch.cat((image_features,text_features),dim=1)
         # print(multi_modal.dtype)
         # print(self.classifier.weight.dtype)
-        print("Multi-modal shape:", multi_modal.shape)
 
         out = self.classifier(multi_modal)
         return out
@@ -191,8 +189,6 @@ for i in range(epochs):
         ans = data["answer"].to('cuda:1')
 
         output = transfer_model(img, ques)
-        print(output)
-        print("||||||Paramas:", ln_params)
         # print(output.shape)
         # print(ans.shape)
         # print(ans)
@@ -206,7 +202,6 @@ for i in range(epochs):
         loss += cosine_loss
             
         train_loss_meter.update(loss.item(), ans.size(0))
-        print(train_loss_meter.avg)
         # Calculate and update accuracy
         acc1 = accuracy(output, ans, topk=(1,))
         train_accuracy_meter.update(acc1[0].item(), ans.size(0))
