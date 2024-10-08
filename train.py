@@ -203,6 +203,7 @@ for i in range(epochs):
         optimizer.step()
         optimizer.zero_grad()
         # break
+    print(f'Epoch: {i+1}, Training Loss: {train_loss_meter.avg:.4f}, Training Accuracy: {train_accuracy_meter.avg:.2f} ')
     transfer_model.eval()
     val_loss_meter.reset()
     val_accuracy_meter.reset()
@@ -215,6 +216,8 @@ for i in range(epochs):
         ques = {"source": ques}
 
         output = transfer_model(img,ques)
+        print(output)
+        print(ans)
         loss =  torch.nn.CrossEntropyLoss()(output,ans)
         val_loss_meter.update(loss.item(), ans.size(0))
         # Calculate and update validation accuracy
