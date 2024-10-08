@@ -209,7 +209,7 @@ for i in range(epochs):
     for data in tqdm(val_loader):
         img = data["img"]
         ques = data["question"]
-        ans = data["answer"]
+        ans = data["answer"].to('cuda:1')
 
         img =  {"source": img}
         ques = {"source": ques}
