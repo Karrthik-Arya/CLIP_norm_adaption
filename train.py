@@ -216,7 +216,7 @@ for i in range(epochs):
 
         output = transfer_model(img,ques)
         loss =  torch.nn.CrossEntropyLoss()(output,ans)
-        val_loss_meter.update(loss.item(), img.size(0))
+        val_loss_meter.update(loss.item(), ans.size(0))
         # Calculate and update validation accuracy
         acc1 = accuracy(output, ans, topk=(1,))
         val_accuracy_meter.update(acc1[0].item(), ans.size(0))
