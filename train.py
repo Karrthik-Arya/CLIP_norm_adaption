@@ -105,7 +105,7 @@ class TransferModel(nn.Module):
             text_features = text_features2
 
         assert torch.isfinite(image_features).all(), "NaN in image features"
-        assert torch.isfinite(text_features).all(), "NaN in text features"
+        assert torch.isfinite(text_features).all(), f"NaN in text features: {text}"
 
         # print(multimodal_emb.shape)
         multi_modal = torch.cat((image_features,text_features),dim=1)
