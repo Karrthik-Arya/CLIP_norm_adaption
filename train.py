@@ -80,7 +80,7 @@ class TransferModel(nn.Module):
 
         self.classifier = nn.Linear(1024,num_classes)
 
-    # @torch.autocast(device_type="cuda")
+    @torch.autocast(device_type="cuda")
     def forward(self, image, text):
 
         if "source" in text:
@@ -188,8 +188,7 @@ for i in range(epochs):
         img = data["img"]
         ques = data["question"]
         ans = data["answer"].to('cuda:1')
-        
-        print(ans)
+
         output = transfer_model(img, ques)
         print(output)
         # print(output.shape)
