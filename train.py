@@ -211,7 +211,7 @@ for i in range(epochs):
         ques = data["question"]
         ans = data["answer"]
 
-        img =  {"source": img},
+        img =  {"source": img}
         ques = {"source": ques}
 
         output = transfer_model(img,ques)
