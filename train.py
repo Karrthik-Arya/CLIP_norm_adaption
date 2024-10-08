@@ -80,7 +80,7 @@ class TransferModel(nn.Module):
 
         self.classifier = nn.Linear(1024,num_classes)
 
-    @torch.autocast(device_type="cuda")
+    # @torch.autocast(device_type="cuda")
     def forward(self, image, text):
 
         if "source" in text:
@@ -94,6 +94,7 @@ class TransferModel(nn.Module):
             text_features2 = self.target_model.encode_text(inputs2)
 
         if ("source" in text) and ("target" in text):
+            print("both")
             image_features = torch.cat((image_features1, image_features2), dim=0)
             text_features = torch.cat((text_features1, text_features2), dim=0)
         elif "source" in text:
@@ -103,10 +104,15 @@ class TransferModel(nn.Module):
             image_features = image_features2
             text_features = text_features2
 
+        assert torch.isfinite(image_features).all(), "NaN in image features"
+        assert torch.isfinite(text_features).all(), "NaN in text features"
+
         # print(multimodal_emb.shape)
         multi_modal = torch.cat((image_features,text_features),dim=1)
         # print(multi_modal.dtype)
         # print(self.classifier.weight.dtype)
+        print("Multi-modal shape:", multi_modal.shape)
+
         out = self.classifier(multi_modal)
         return out
     
