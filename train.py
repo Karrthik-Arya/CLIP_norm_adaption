@@ -194,7 +194,7 @@ for i in range(epochs):
 
         loss =  torch.nn.CrossEntropyLoss()(output[:len(ques['source'])],ans[:len(ques['source'])])
         loss +=  torch.nn.CrossEntropyLoss()(output[len(ques['source']):], output[len(ques['source']):])
-        loss += cosine_loss
+        # loss += cosine_loss
             
         train_loss_meter.update(loss.item(), ans.size(0))
         print(train_loss_meter.avg)
