@@ -183,7 +183,7 @@ for i in range(epochs):
         ques = data["question"]
         ans = data["answer"].to('cuda:1')
         
-
+        print(ans)
         output = transfer_model(img, ques)
         print(output)
         # print(output.shape)
