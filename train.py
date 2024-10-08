@@ -59,6 +59,7 @@ class TransferModel(nn.Module):
         super(TransferModel, self).__init__()
         self.device = "cuda:1" if torch.cuda.is_available() else "cpu"
         self.model, self.preprocess = clip.load("ViT-B/32", device=self.device)
+        self.model.float()
 
         self.source_ln = copy.deepcopy(self.model.ln_final)
         self.target_ln = copy.deepcopy(self.model.ln_final)
@@ -80,7 +81,7 @@ class TransferModel(nn.Module):
 
         self.classifier = nn.Linear(1024,num_classes)
 
-    @torch.autocast(device_type="cuda")
+
     def forward(self, image, text):
 
         if "source" in text:
