@@ -193,7 +193,9 @@ for i in range(epochs):
         cosine_loss = -cosine_sim.mean()
 
         loss =  torch.nn.CrossEntropyLoss()(output[:len(ques['source'])],ans[:len(ques['source'])])
-        loss +=  torch.nn.CrossEntropyLoss()(output[len(ques['source']):], output[len(ques['source']):])
+        probs = F.softmax(output[len(ques['source']):], dim=-1)
+        self_entropy = -torch.sum(probs * torch.log(probs + 1e-9), dim=-1).mean()
+        loss +=  self_entropy
         # loss += cosine_loss
             
         train_loss_meter.update(loss.item(), ans.size(0))
