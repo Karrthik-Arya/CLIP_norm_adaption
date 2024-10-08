@@ -83,18 +83,25 @@ class TransferModel(nn.Module):
     @torch.autocast(device_type="cuda")
     def forward(self, image, text):
 
-        inputs1 = clip.tokenize(text.get("source", torch.tensor([]))).to(self.device)
-        image_features1 = self.source_model.encode_image(image.get("source", torch.tensor([])).to(self.device))
-        text_features1 = self.source_model.encode_text(inputs1)
+        if "source" in text:
+            inputs1 = clip.tokenize(text["source"]).to(self.device)
+            image_features1 = self.source_model.encode_image(image["source"].to(self.device))
+            text_features1 = self.source_model.encode_text(inputs1)
 
+        if "target" in text:
+            inputs2 = clip.tokenize(text["target"]).to(self.device)
+            image_features2 = self.target_model.encode_image(image["target"].to(self.device))
+            text_features2 = self.target_model.encode_text(inputs2)
 
-        inputs2 = clip.tokenize(text.get("target", torch.tensor([]))).to(self.device)
-        image_features2 = self.target_model.encode_image(image.get("target", torch.tensor([])).to(self.device))
-        text_features2 = self.target_model.encode_text(inputs2)
-
-
-        image_features = torch.cat((image_features1, image_features2), dim=0)
-        text_features = torch.cat((text_features1, text_features2), dim=0)
+        if ("source" in text) and ("target" in text):
+            image_features = torch.cat((image_features1, image_features2), dim=0)
+            text_features = torch.cat((text_features1, text_features2), dim=0)
+        elif "source" in text:
+            image_features = image_features1
+            text_features = text_features1
+        elif "target" in text:
+            image_features = image_features2
+            text_features = text_features2
 
         # print(multimodal_emb.shape)
         multi_modal = torch.cat((image_features,text_features),dim=1)
@@ -203,7 +210,8 @@ for i in range(epochs):
         img = data["img"]
         ques = data["question"]
         ans = data["answer"]
-        img =  {"source": img}
+
+        img =  {"source": img},
         ques = {"source": ques}
 
         output = transfer_model(img,ques)
