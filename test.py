@@ -126,8 +126,8 @@ for data in tqdm(test_loader):
     img = data["img"]
     ques = data["question"]
     ans = data["answer"].to("cuda:1")
-    img =  {"target": img}
-    ques = {"target": ques}
+    img =  {"source": img}
+    ques = {"source": ques}
 
     output = transfer_model(img,ques)
     loss =  torch.nn.CrossEntropyLoss()(output,ans)
