@@ -149,7 +149,6 @@ for data in tqdm(test_loader):
 
     for i, image in enumerate(img_path):
         cat = image.split("_")[0]
-        print(cat)
         cat_output[cat].append(output[i])
         cat_ans[cat].append(ans[i])
 
@@ -161,10 +160,9 @@ for data in tqdm(test_loader):
     for cat in cat_output:
         answer = torch.tensor(cat_ans[cat]).to("cuda:1")
         pred = torch.tensor(cat_output[cat]).to("cuda:1")
-        print(pred.shape)
-        print(answer.shape)
-        acc1 = accuracy(pred, answer, topk=(1,))
-        cat_accuracy_meters[cat].update(acc1[0].item(), answer.size(0))
+        if(answer.size(0) > 0):
+            acc1 = accuracy(pred, answer, topk=(1,))
+            cat_accuracy_meters[cat].update(acc1[0].item(), answer.size(0))
 
     acc1 = accuracy(output, ans, topk=(1,))
     test_accuracy_meter.update(acc1[0].item(), ans.size(0))
