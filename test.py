@@ -131,6 +131,7 @@ for data in tqdm(test_loader):
     img = data["img"]
     ques = data["question"]
     ans = data["answer"]
+    img_path = data["img_path"]
     img =  {"target": img}
     ques = {"target": ques}
 
@@ -146,7 +147,7 @@ for data in tqdm(test_loader):
         "VQAabs": []
     }
 
-    for i, image in enumerate(img["target"]):
+    for i, image in enumerate(img_path):
         cat = image.split("_")[0]
         cat_output[cat].append(output[i])
         cat_ans[cat].append(ans[i])
