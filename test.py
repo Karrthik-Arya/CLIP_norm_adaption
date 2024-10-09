@@ -121,19 +121,50 @@ num_workers=4
 test_loader = DataLoader(test_dataset, num_workers=num_workers, batch_size=batch_size, shuffle=False)
 
 test_accuracy_meter = AverageMeter()
+cat_accuracy_meters = {
+    "VQAabs": AverageMeter(),
+    "VG": AverageMeter(),
+    "GQA": AverageMeter()
+}
 
 for data in tqdm(test_loader):
     img = data["img"]
     ques = data["question"]
-    ans = data["answer"].to("cuda:1")
-    img =  {"source": img}
-    ques = {"source": ques}
+    ans = data["answer"]
+    img =  {"target": img}
+    ques = {"target": ques}
 
     output = transfer_model(img,ques)
-    loss =  torch.nn.CrossEntropyLoss()(output,ans)
+    cat_output={
+        "GQA": [],
+        "VG": [],
+        "VQAabs": []
+    }
+    cat_ans={
+        "GQA": [],
+        "VG": [],
+        "VQAabs": []
+    }
+
+    for i, image in enumerate(img["target"]):
+        cat = image.split("_")[0]
+        cat_output[cat].append(output[i])
+        cat_ans[cat].append(ans[i])
+
+
+
+    # loss =  torch.nn.CrossEntropyLoss()(output,ans)
     # val_loss_meter.update(loss.item(), img.size(0))
     # Calculate and update validation accuracy
+    for cat in cat_output:
+        answer = torch.tensor(cat_ans[cat]).to("cuda:1")
+        pred = torch.tensor(cat_output[cat]).to("cuda:1")
+        acc1 = accuracy(pred, answer, topk=(1,))
+        cat_accuracy_meters[cat].update(acc1[0].item(), answer.size(0))
+
     acc1 = accuracy(output, ans, topk=(1,))
     test_accuracy_meter.update(acc1[0].item(), ans.size(0))
 
-print(f'Test Accuracy: {test_accuracy_meter.avg:.2f} ')
+print(f'Total Test Accuracy: {test_accuracy_meter.avg:.2f} ')
+for cat, acc in cat_accuracy_meters.items():
+    print(f'{cat} Test Accuracy: {acc.avg:.2f}')
