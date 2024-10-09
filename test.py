@@ -164,6 +164,7 @@ for data in tqdm(test_loader):
             acc1 = accuracy(pred, answer, topk=(1,))
             cat_accuracy_meters[cat].update(acc1[0].item(), answer.size(0))
 
+    ans = ans.to("cuda:1")
     acc1 = accuracy(output, ans, topk=(1,))
     test_accuracy_meter.update(acc1[0].item(), ans.size(0))
 
