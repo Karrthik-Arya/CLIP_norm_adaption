@@ -159,8 +159,8 @@ for data in tqdm(test_loader):
     # Calculate and update validation accuracy
     for cat in cat_output:
         answer = torch.tensor(cat_ans[cat]).to("cuda:1")
-        pred = torch.stack(cat_output[cat]).to("cuda:1")
         if(answer.size(0) > 0):
+            pred = torch.stack(cat_output[cat]).to("cuda:1")
             acc1 = accuracy(pred, answer, topk=(1,))
             cat_accuracy_meters[cat].update(acc1[0].item(), answer.size(0))
 
