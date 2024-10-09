@@ -149,6 +149,7 @@ for data in tqdm(test_loader):
 
     for i, image in enumerate(img_path):
         cat = image.split("_")[0]
+        print(cat)
         cat_output[cat].append(output[i])
         cat_ans[cat].append(ans[i])
 
