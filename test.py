@@ -160,6 +160,8 @@ for data in tqdm(test_loader):
     for cat in cat_output:
         answer = torch.tensor(cat_ans[cat]).to("cuda:1")
         pred = torch.tensor(cat_output[cat]).to("cuda:1")
+        print(pred.shape)
+        print(answer.shape)
         acc1 = accuracy(pred, answer, topk=(1,))
         cat_accuracy_meters[cat].update(acc1[0].item(), answer.size(0))
 
