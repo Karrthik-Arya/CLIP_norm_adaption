@@ -13,6 +13,23 @@ from datasets.trainDataset import TrainDataset
 from datasets.testDatset import TestDataset
 from tqdm import tqdm
 import copy
+import random
+from transformers import OFATokenizer, OFAModel
+
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+ofa_tokenizer = OFATokenizer.from_pretrained("ofa-base")
+ofa_model = OFAModel.from_pretrained("ofa-base").to(device)
+ofa_model.eval()
+
+mean, std = [0.5, 0.5, 0.5], [0.5, 0.5, 0.5]
+resolution = 256
+patch_resize_transform = transforms.Compose([
+    lambda image: image.convert("RGB"),
+    transforms.Resize((resolution, resolution), interpolation=Image.BICUBIC),
+    transforms.ToTensor(), 
+    transforms.Normalize(mean=mean, std=std)
+])
 
 class AverageMeter(object):
     """Computes and stores the average and current value"""
@@ -55,7 +72,7 @@ def target_hook(module, input, output):
     ln_params["target"] = torch.cat((module.weight.data.clone(), module.bias.data.clone()), dim=0)
 
 class TransferModel(nn.Module):
-    def __init__(self,num_classes=1000):
+    def __init__(self,num_classes=1000, caption_embedding_dim=128):
         super(TransferModel, self).__init__()
         self.device = "cuda:1" if torch.cuda.is_available() else "cpu"
         self.model, self.preprocess = clip.load("ViT-B/32", device=self.device)
@@ -79,21 +96,83 @@ class TransferModel(nn.Module):
         self.target_model = copy.deepcopy(self.model)
         self.target_model.ln_final = self.target_ln
 
+        text_hidden_size = self.model.text_projection.shape[1]
+        self.caption_projectors = [nn.Linear(caption_embedding_dim, text_hidden_size) for i in range(3)]
+
         self.classifier = nn.Linear(1024,num_classes)
 
+    def generate_caption(self, image):
+        """Generate caption for an image using the OFA model."""
+        with torch.no_grad():
+            inputs = ofa_tokenizer("what does the image describe?", return_tensors="pt").to(self.device)
+            images = patch_resize_transform(image).unsqueeze(0).to(self.device)
+            outputs = ofa_model.generate(**inputs, patch_images=images)
+            caption = ofa_tokenizer.batch_decode(outputs, skip_special_tokens=True)[0]
+        return caption
 
-    def forward(self, image, text):
+    def embed_caption(self, caption):
+        """Embed the caption into the same dimensionality as LXMERT's hidden states."""
+        tokens = clip.tokenize(caption).to(self.device)
+        with torch.no_grad():
+            caption_embeddings = self.model.encode_text(tokens)
+            caption_embeddings = caption_embeddings / caption_embeddings.norm(dim=-1, keepdim=True)
+        return caption_embeddings
 
+
+    def forward(self, image, text, caption_embeddings):
         if "source" in text:
             inputs1 = clip.tokenize(text["source"]).to(self.device)
             image_features1 = self.source_model.encode_image(image["source"].to(self.device))
-            text_features1 = self.source_model.encode_text(inputs1)
+
+            text_encoder1 = self.source_model.transformer
+            text_embedding1 = self.source_model.token_embedding(inputs1)
+            position_embedding1 = self.source_model.positional_embedding[: text_embedding1.size(1), :]
+
+            total_layers = len(text_encoder1.resblocks)
+            layers_to_modify = sorted(random.sample(range(total_layers), 3))
+            x = text_embedding1 + position_embedding1
+            x = x.permute(1, 0, 2)
+            caption_idx = 0
+            # text_features1 = self.source_model.encode_text(inputs1)
+
+            for i, layer in enumerate(text_encoder1.resblocks):
+                x = layer(x)
+                if i in layers_to_modify:
+                    caption_embeddings_projected = self.caption_projectors[caption_idx](caption_embeddings).unsqueeze(0)
+                    x = torch.cat([x, caption_embeddings_projected], dim=0)
+                    caption_idx += 1
+
+            x = x.permute(1, 0, 2)
+            x = self.source_model.ln_final(x)  
+            text_features1 = x[torch.arange(x.shape[0]), inputs1.argmax(dim=-1)]  
+            text_features1 = text_features1 / text_features1.norm(dim=-1, keepdim=True)
 
         if "target" in text:
             inputs2 = clip.tokenize(text["target"]).to(self.device)
             image_features2 = self.target_model.encode_image(image["target"].to(self.device))
-            text_features2 = self.target_model.encode_text(inputs2)
+            text_encoder2 = self.target_model.transformer
+            text_embedding2 = self.target_model.token_embedding(inputs2)
+            position_embedding2 = self.target_model.positional_embedding[: text_embedding2.size(1), :]
 
+            total_layers = len(text_encoder2.resblocks)
+            layers_to_modify = sorted(random.sample(range(total_layers), 3))
+            x = text_embedding2 + position_embedding2
+            x = x.permute(1, 0, 2)
+            # text_features1 = self.source_model.encode_text(inputs1)
+            caption_idx = 0
+
+            for i, layer in enumerate(text_encoder2.resblocks):
+                x = layer(x)
+                if i in layers_to_modify:
+                    caption_embeddings_projected = self.caption_projectors[caption_idx](caption_embeddings).unsqueeze(0)
+                    x = torch.cat([x, caption_embeddings_projected], dim=0)
+                    caption_idx += 1
+
+            x = x.permute(1, 0, 2)
+            x = self.target_model.ln_final(x)  
+            text_features2 = x[torch.arange(x.shape[0]), inputs2.argmax(dim=-1)]  
+            text_features2 = text_features2 / text_features2.norm(dim=-1, keepdim=True)
+        
         if ("source" in text) and ("target" in text):
             image_features = torch.cat((image_features1, image_features2), dim=0)
             text_features = torch.cat((text_features1, text_features2), dim=0)
@@ -187,8 +266,14 @@ for i in range(epochs):
         img = data["img"]
         ques = data["question"]
         ans = data["answer"].to('cuda:1')
+        captions = {"source": [], "target": []}
+        captions["source"] = [transfer_model.generate_caption(image) for image in img["source"]]
+        captions["target"] = [transfer_model.generate_caption(image) for image in img["target"]]
+        
+        captions["source"] = [transfer_model.embed_caption(caption) for caption in captions["source"]]
+        captions["target"] = [transfer_model.embed_caption(caption) for caption in captions["target"]]
 
-        output = transfer_model(img, ques)
+        output = transfer_model(img, ques, captions)
         # print(output.shape)
         # print(ans.shape)
         # print(ans)

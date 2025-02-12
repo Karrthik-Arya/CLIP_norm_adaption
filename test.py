@@ -3,8 +3,15 @@ import torch.nn as nn
 import clip
 from torch.utils.data import DataLoader
 from datasets.testDatset import TestDataset
+from transformers import OFATokenizer, OFAModel
 from tqdm import tqdm
 import copy
+
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+ofa_tokenizer = OFATokenizer.from_pretrained("ofa-base")
+ofa_model = OFAModel.from_pretrained("ofa-base").to(device)
+ofa_model.eval()
 
 class AverageMeter(object):
     """Computes and stores the average and current value"""
@@ -72,6 +79,22 @@ class TransferModel(nn.Module):
         self.target_model.ln_final = self.target_ln
 
         self.classifier = nn.Linear(1024,num_classes)
+
+    def generate_caption(self, image):
+        """Generate caption for an image using the OFA model."""
+        with torch.no_grad():
+            inputs = ofa_tokenizer("what does the image describe?", return_tensors="pt").to(self.device)
+            images = ofa_model.preprocess_image(image).unsqueeze(0).to(self.device)
+            outputs = ofa_model.generate(**inputs, patch_images=images)
+            caption = ofa_tokenizer.batch_decode(outputs, skip_special_tokens=True)[0]
+        return caption
+
+    def embed_caption(self, caption):
+        """Embed the caption into the same dimensionality as LXMERT's hidden states."""
+        tokens = clip.tokenize(caption).to(self.device)
+        with torch.no_grad():
+            token_embeddings = self.model.token_embedding(tokens)
+        return self.caption_embedding_layer()
 
 
     def forward(self, image, text):
