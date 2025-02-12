@@ -18,8 +18,10 @@ from transformers import OFATokenizer, OFAModel
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-ofa_tokenizer = OFATokenizer.from_pretrained("ofa-base")
-ofa_model = OFAModel.from_pretrained("ofa-base").to(device)
+ckpt_dir = "../OFA-large-caption"
+ofa_tokenizer = OFATokenizer.from_pretrained(ckpt_dir)
+ofa_model = OFAModel.from_pretrained(ckpt_dir, use_cache=False)
+ofa_model.to(device)
 ofa_model.eval()
 
 mean, std = [0.5, 0.5, 0.5], [0.5, 0.5, 0.5]
