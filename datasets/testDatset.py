@@ -13,7 +13,7 @@ from torchvision import transforms
 # weights = [1/answer_counts[i] for i in test_df['answer'].values]
 
 device = "cuda:1" if torch.cuda.is_available() else "cpu"
-mp.set_start_method('spawn')
+# mp.set_start_method('spawn')
 model, preprocess = clip.load("ViT-B/32", device=device)
 
 ckpt_dir = "../OFA-large-caption"
