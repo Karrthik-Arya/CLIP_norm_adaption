@@ -18,7 +18,7 @@ def most_common_from_dict(dct):
     return max(set(lst), key=lst.count)
 
 device = "cuda:1" if torch.cuda.is_available() else "cpu"
-mp.set_start_method('spawn')
+# mp.set_start_method('spawn')
 model, preprocess = clip.load("ViT-B/32", device=device)
 ckpt_dir = "../OFA-large-caption"
 ofa_tokenizer = OFATokenizer.from_pretrained(ckpt_dir)
