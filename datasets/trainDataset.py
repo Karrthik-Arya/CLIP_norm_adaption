@@ -9,6 +9,8 @@ import numpy as np
 import re
 from tqdm import tqdm
 import clip
+from transformers import OFATokenizer, OFAModel
+from torchvision import transforms
 
 def most_common_from_dict(dct):
     lst = [x["answer"] for x in dct]
@@ -16,6 +18,29 @@ def most_common_from_dict(dct):
 
 device = "cuda:1" if torch.cuda.is_available() else "cpu"
 model, preprocess = clip.load("ViT-B/32", device=device)
+ckpt_dir = "../OFA-large-caption"
+ofa_tokenizer = OFATokenizer.from_pretrained(ckpt_dir)
+ofa_model = OFAModel.from_pretrained(ckpt_dir, use_cache=False)
+ofa_model.to(device)
+ofa_model.eval()
+
+mean, std = [0.5, 0.5, 0.5], [0.5, 0.5, 0.5]
+resolution = 256
+patch_resize_transform = transforms.Compose([
+    lambda image: image.convert("RGB"),
+    transforms.Resize((resolution, resolution), interpolation=Image.BICUBIC),
+    transforms.ToTensor(), 
+    transforms.Normalize(mean=mean, std=std)
+])
+
+def generate_caption(image):
+    """Generate caption for an image using the OFA model."""
+    with torch.no_grad():
+        inputs = ofa_tokenizer("what does the image describe?", return_tensors="pt").to(device)
+        images = patch_resize_transform(image).unsqueeze(0).to(device)
+        outputs = ofa_model.generate(**inputs, patch_images=images)
+        caption = ofa_tokenizer.batch_decode(outputs, skip_special_tokens=True)[0]
+    return caption
 
 def preprocessing(text):
   input_text = text
@@ -118,9 +143,10 @@ class TrainDataset(Dataset):
        
         image_path = os.path.expanduser(os.path.join(self.root, image_path))
         img = Image.open(image_path).convert('RGB')
+        caption = generate_caption(img)
         img = preprocess(img)
         answer = torch.tensor(self.vocab[selected_answers])
-        return {"img": img, "question": question, "answer": answer}
+        return {"img": img, "question": question, "answer": answer, "caption": caption}
     
     def __len__(self):
         return len(self.df["answers"])
