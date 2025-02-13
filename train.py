@@ -2,7 +2,7 @@
 from PIL import Image
 import requests
 import torch
-torch. multiprocessing.set_start_method('spawn')
+import torch. multiprocessing as mp
 import torch.nn as nn
 import clip
 from torchvision import transforms
@@ -172,146 +172,150 @@ class TransferModel(nn.Module):
 
         out = self.classifier(multi_modal)
         return out
-    
-batch_size=128
-num_workers=4
-lr =1e-3
-epochs = 50
-momentum = 0.99
-image_size = 224
+
+def main():
+    batch_size=128
+    num_workers=4
+    lr =1e-3
+    epochs = 50
+    momentum = 0.99
+    image_size = 224
 
 
-mean = (0.485, 0.456, 0.406)
-std = (0.229, 0.224, 0.225)
+    mean = (0.485, 0.456, 0.406)
+    std = (0.229, 0.224, 0.225)
 
-train_dataset = TrainDataset('data/vqa_v2','train')
-val_dataset = TrainDataset('data/vqa_v2','val','VQAv2')
-train_targ_dataset = TestDataset('data/test/images', 'data/test/train_questions.csv')
-test_targ_dataset = TestDataset('data/test/images', 'data/test/test_questions.csv')
+    train_dataset = TrainDataset('data/vqa_v2','train')
+    val_dataset = TrainDataset('data/vqa_v2','val','VQAv2')
+    train_targ_dataset = TestDataset('data/test/images', 'data/test/train_questions.csv')
+    test_targ_dataset = TestDataset('data/test/images', 'data/test/test_questions.csv')
 
-train_loader = DataLoader(train_dataset, num_workers=num_workers, batch_size=int(batch_size*0.75), shuffle=False)
-train_targ_loader = DataLoader(train_targ_dataset, num_workers=num_workers, batch_size=int(batch_size*0.25), shuffle=False)
-val_loader = DataLoader(val_dataset, num_workers=num_workers, batch_size=batch_size, shuffle=False)
-# cross_loader = DataLoader(cross_dataset, num_workers=num_workers, batch_size=batch_size, shuffle=False)
+    train_loader = DataLoader(train_dataset, num_workers=num_workers, batch_size=int(batch_size*0.75), shuffle=False)
+    train_targ_loader = DataLoader(train_targ_dataset, num_workers=num_workers, batch_size=int(batch_size*0.25), shuffle=False)
+    val_loader = DataLoader(val_dataset, num_workers=num_workers, batch_size=batch_size, shuffle=False)
+    # cross_loader = DataLoader(cross_dataset, num_workers=num_workers, batch_size=batch_size, shuffle=False)
 
-train_loader_itr = iter(train_loader)
-train_targ_loader_itr = iter(train_targ_loader)
+    train_loader_itr = iter(train_loader)
+    train_targ_loader_itr = iter(train_targ_loader)
 
-def mixed_data_loader(loader1, loader2):
-    while True:
-        try:
-            batch1 = next(loader1)
-        except StopIteration:
-            break
-        
-        try:
-            batch2 = next(loader2)
-        except StopIteration:
-            break
-
-        mixed_batch = {
-            "img": {"source": batch1["img"], "target": batch2["img"]},
-            "question": {"source": batch1["question"], "target":batch2["question"]},  
-            "answer": torch.cat((batch1["answer"], batch2["answer"]), dim=0),   
-            "caption": {"source": batch1["caption"], "target": batch2["caption"]}       
-        }
-        
-        yield mixed_batch
-
-transfer_model = TransferModel()
-
-transfer_model = transfer_model.to('cuda:1')
-optimizer = AdamW(transfer_model.parameters(), lr=lr)
-
-optimizer.zero_grad()
-
-train_loss_meter = AverageMeter()
-val_loss_meter = AverageMeter()
-# cross_loss_meter = AverageMeter()
-train_accuracy_meter = AverageMeter()
-val_accuracy_meter = AverageMeter()
-# cross_accuracy_meter = AverageMeter()
-best_val_acc = 0
-
-for i in range(epochs):
-
-    transfer_model.train()
-    train_loss_meter.reset()
-    train_accuracy_meter.reset()
-    mixed_loader = mixed_data_loader(train_loader_itr, train_targ_loader_itr)
-
-    for data in tqdm(mixed_loader):
-        img = data["img"]
-        ques = data["question"]
-        ans = data["answer"].to('cuda:1')
-        captions = data["caption"]
-        # captions["source"] = [transfer_model.generate_caption(image) for image in img["source"]]
-        # captions["target"] = [transfer_model.generate_caption(image) for image in img["target"]]
-        
-        captions["source"] = [transfer_model.embed_caption(caption) for caption in captions["source"]]
-        captions["target"] = [transfer_model.embed_caption(caption) for caption in captions["target"]]
-
-        output = transfer_model(img, ques, captions)
-        # print(output.shape)
-        # print(ans.shape)
-        # print(ans)
-        cosine_sim = F.cosine_similarity(ln_params['source'], ln_params['target'], dim=0)
-        cosine_loss = -cosine_sim.mean()
-
-        loss =  torch.nn.CrossEntropyLoss()(output[:len(ques['source'])],ans[:len(ques['source'])])
-        probs = F.softmax(output[len(ques['source']):], dim=-1)
-        self_entropy = -torch.sum(probs * torch.log(probs + 1e-9), dim=-1).mean()
-        loss +=  self_entropy
-        loss += cosine_loss
+    def mixed_data_loader(loader1, loader2):
+        while True:
+            try:
+                batch1 = next(loader1)
+            except StopIteration:
+                break
             
-        train_loss_meter.update(loss.item(), ans.size(0))
-        # Calculate and update accuracy
-        acc1 = accuracy(output, ans, topk=(1,))
-        train_accuracy_meter.update(acc1[0].item(), ans.size(0))
-        loss.backward()
-        optimizer.step()
-        optimizer.zero_grad()
-        # break
-    print(f'Epoch: {i+1}, Training Loss: {train_loss_meter.avg:.4f}, Training Accuracy: {train_accuracy_meter.avg:.2f} ')
-    transfer_model.eval()
-    val_loss_meter.reset()
-    val_accuracy_meter.reset()
-    for data in tqdm(val_loader):
-        img = data["img"]
-        ques = data["question"]
-        ans = data["answer"].to('cuda:1')
+            try:
+                batch2 = next(loader2)
+            except StopIteration:
+                break
 
-        img =  {"source": img}
-        ques = {"source": ques}
+            mixed_batch = {
+                "img": {"source": batch1["img"], "target": batch2["img"]},
+                "question": {"source": batch1["question"], "target":batch2["question"]},  
+                "answer": torch.cat((batch1["answer"], batch2["answer"]), dim=0),   
+                "caption": {"source": batch1["caption"], "target": batch2["caption"]}       
+            }
+            
+            yield mixed_batch
 
-        output = transfer_model(img,ques)
-        loss =  torch.nn.CrossEntropyLoss()(output,ans)
-        val_loss_meter.update(loss.item(), ans.size(0))
-        # Calculate and update validation accuracy
-        acc1 = accuracy(output, ans, topk=(1,))
-        val_accuracy_meter.update(acc1[0].item(), ans.size(0))
-        # break
-    # cross_loss_meter.reset()
-    # cross_accuracy_meter.reset()
-    # for data in tqdm(cross_loader):
-    #     img = data["img"]
-    #     ques = data["question"]
-    #     ans = data["answer"]
-    #     img,ans = img.to('cuda'),ans.to('cuda')
+    transfer_model = TransferModel()
 
-    #     output = transfer_model(img,ques)
+    transfer_model = transfer_model.to('cuda:1')
+    optimizer = AdamW(transfer_model.parameters(), lr=lr)
 
-    #     loss =  torch.nn.CrossEntropyLoss()(output,ans)
-    #     # cross_loss_meter.update(loss.item(), img.size(0))
-    #     # Calculate and update accuracy
-    #     acc1 = accuracy(output, ans, topk=(1,))
-        # cross_accuracy_meter.update(acc1[0].item(), img.size(0))
-        # break
-    # print(val_accuracy_meter.avg)
-    # print(val_loss_meter.avg)
-    print(f'Epoch: {i+1}, Validation Loss: {val_loss_meter.avg:.4f}, Validation Accuracy: {val_accuracy_meter.avg:.2f} ')
-    if best_val_acc< val_accuracy_meter.avg:
-        torch.save(transfer_model.state_dict(), './clip_vqa_v2.pth')
-        best_val_acc = val_accuracy_meter.avg
-        print("Model Saved!!!")
+    optimizer.zero_grad()
 
+    train_loss_meter = AverageMeter()
+    val_loss_meter = AverageMeter()
+    # cross_loss_meter = AverageMeter()
+    train_accuracy_meter = AverageMeter()
+    val_accuracy_meter = AverageMeter()
+    # cross_accuracy_meter = AverageMeter()
+    best_val_acc = 0
+
+    for i in range(epochs):
+
+        transfer_model.train()
+        train_loss_meter.reset()
+        train_accuracy_meter.reset()
+        mixed_loader = mixed_data_loader(train_loader_itr, train_targ_loader_itr)
+
+        for data in tqdm(mixed_loader):
+            img = data["img"]
+            ques = data["question"]
+            ans = data["answer"].to('cuda:1')
+            captions = data["caption"]
+            # captions["source"] = [transfer_model.generate_caption(image) for image in img["source"]]
+            # captions["target"] = [transfer_model.generate_caption(image) for image in img["target"]]
+            
+            captions["source"] = [transfer_model.embed_caption(caption) for caption in captions["source"]]
+            captions["target"] = [transfer_model.embed_caption(caption) for caption in captions["target"]]
+
+            output = transfer_model(img, ques, captions)
+            # print(output.shape)
+            # print(ans.shape)
+            # print(ans)
+            cosine_sim = F.cosine_similarity(ln_params['source'], ln_params['target'], dim=0)
+            cosine_loss = -cosine_sim.mean()
+
+            loss =  torch.nn.CrossEntropyLoss()(output[:len(ques['source'])],ans[:len(ques['source'])])
+            probs = F.softmax(output[len(ques['source']):], dim=-1)
+            self_entropy = -torch.sum(probs * torch.log(probs + 1e-9), dim=-1).mean()
+            loss +=  self_entropy
+            loss += cosine_loss
+                
+            train_loss_meter.update(loss.item(), ans.size(0))
+            # Calculate and update accuracy
+            acc1 = accuracy(output, ans, topk=(1,))
+            train_accuracy_meter.update(acc1[0].item(), ans.size(0))
+            loss.backward()
+            optimizer.step()
+            optimizer.zero_grad()
+            # break
+        print(f'Epoch: {i+1}, Training Loss: {train_loss_meter.avg:.4f}, Training Accuracy: {train_accuracy_meter.avg:.2f} ')
+        transfer_model.eval()
+        val_loss_meter.reset()
+        val_accuracy_meter.reset()
+        for data in tqdm(val_loader):
+            img = data["img"]
+            ques = data["question"]
+            ans = data["answer"].to('cuda:1')
+
+            img =  {"source": img}
+            ques = {"source": ques}
+
+            output = transfer_model(img,ques)
+            loss =  torch.nn.CrossEntropyLoss()(output,ans)
+            val_loss_meter.update(loss.item(), ans.size(0))
+            # Calculate and update validation accuracy
+            acc1 = accuracy(output, ans, topk=(1,))
+            val_accuracy_meter.update(acc1[0].item(), ans.size(0))
+            # break
+        # cross_loss_meter.reset()
+        # cross_accuracy_meter.reset()
+        # for data in tqdm(cross_loader):
+        #     img = data["img"]
+        #     ques = data["question"]
+        #     ans = data["answer"]
+        #     img,ans = img.to('cuda'),ans.to('cuda')
+
+        #     output = transfer_model(img,ques)
+
+        #     loss =  torch.nn.CrossEntropyLoss()(output,ans)
+        #     # cross_loss_meter.update(loss.item(), img.size(0))
+        #     # Calculate and update accuracy
+        #     acc1 = accuracy(output, ans, topk=(1,))
+            # cross_accuracy_meter.update(acc1[0].item(), img.size(0))
+            # break
+        # print(val_accuracy_meter.avg)
+        # print(val_loss_meter.avg)
+        print(f'Epoch: {i+1}, Validation Loss: {val_loss_meter.avg:.4f}, Validation Accuracy: {val_accuracy_meter.avg:.2f} ')
+        if best_val_acc< val_accuracy_meter.avg:
+            torch.save(transfer_model.state_dict(), './clip_vqa_v2.pth')
+            best_val_acc = val_accuracy_meter.avg
+            print("Model Saved!!!")
+
+if __name__ == "__main__": 
+    mp.set_start_method("spawn", force=True)
+    main()
