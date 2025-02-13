@@ -16,7 +16,7 @@ from tqdm import tqdm
 import copy
 import random
 # from transformers import OFATokenizer, OFAModel
-mp.set_start_method('spawn')
+mp.set_start_method('spawn', force=True)
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 class AverageMeter(object):
