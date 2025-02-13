@@ -16,7 +16,7 @@ from tqdm import tqdm
 import copy
 import random
 # from transformers import OFATokenizer, OFAModel
-
+mp.set_start_method('spawn')
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 class AverageMeter(object):
@@ -180,8 +180,6 @@ lr =1e-3
 epochs = 50
 momentum = 0.99
 image_size = 224
-
-mp.set_start_method('spawn')
 
 
 mean = (0.485, 0.456, 0.406)
