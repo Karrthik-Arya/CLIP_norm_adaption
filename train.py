@@ -2,12 +2,12 @@
 from PIL import Image
 import requests
 import torch
+torch. multiprocessing.set_start_method('spawn')
 import torch.nn as nn
 import clip
 from torchvision import transforms
 from torchvision.transforms.functional import InterpolationMode
 from torch.utils.data import DataLoader
-import torch. multiprocessing as mp
 from torch.optim import SGD,AdamW
 import torch.nn.functional as F
 from datasets.trainDataset import TrainDataset
@@ -16,7 +16,6 @@ from tqdm import tqdm
 import copy
 import random
 # from transformers import OFATokenizer, OFAModel
-mp.set_start_method('spawn', force=True)
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 class AverageMeter(object):
