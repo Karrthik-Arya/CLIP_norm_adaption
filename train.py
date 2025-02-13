@@ -7,6 +7,7 @@ import clip
 from torchvision import transforms
 from torchvision.transforms.functional import InterpolationMode
 from torch.utils.data import DataLoader
+import torch. multiprocessing as mp
 from torch.optim import SGD,AdamW
 import torch.nn.functional as F
 from datasets.trainDataset import TrainDataset
@@ -180,7 +181,7 @@ epochs = 50
 momentum = 0.99
 image_size = 224
 
-
+mp.set_start_method('spawn')
 
 
 mean = (0.485, 0.456, 0.406)

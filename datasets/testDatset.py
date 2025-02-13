@@ -3,6 +3,7 @@ from torch.utils.data import Dataset
 from PIL import Image
 import os
 import torch
+import torch. multiprocessing as mp
 import clip
 from transformers import OFATokenizer, OFAModel
 from torchvision import transforms
@@ -12,6 +13,7 @@ from torchvision import transforms
 # weights = [1/answer_counts[i] for i in test_df['answer'].values]
 
 device = "cuda:1" if torch.cuda.is_available() else "cpu"
+mp.set_start_method('spawn')
 model, preprocess = clip.load("ViT-B/32", device=device)
 
 ckpt_dir = "../OFA-large-caption"
