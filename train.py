@@ -186,7 +186,7 @@ def main():
     std = (0.229, 0.224, 0.225)
 
     train_dataset = TrainDataset('data/vqa_v2','train')
-    val_dataset = TrainDataset('data/vqa_v2','val','VQAv2')
+    val_dataset = TrainDataset('data/vqa_v2','val')
     train_targ_dataset = TestDataset('data/test/images', 'data/test/train_questions.csv')
     test_targ_dataset = TestDataset('data/test/images', 'data/test/test_questions.csv')
 
