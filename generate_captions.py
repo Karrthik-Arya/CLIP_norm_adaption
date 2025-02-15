@@ -54,7 +54,7 @@ def generate_train_captions(root, subset):
     
     captions = []
     for image_path in image_paths:
-        img = Image.open(image_path).convert('RGB')
+        img = Image.open(os.path.expanduser(os.path.join(root, image_path))).convert('RGB')
         caption = generate_caption(img)
         captions.append(caption)
     
