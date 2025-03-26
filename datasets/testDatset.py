@@ -8,41 +8,40 @@ import clip
 from transformers import OFATokenizer, OFAModel
 from torchvision import transforms
 
-# test_df = 
-# answer_counts = test_df['answer'].value_counts()
-# weights = [1/answer_counts[i] for i in test_df['answer'].values]
-
 device = "cuda:1" if torch.cuda.is_available() else "cpu"
 # mp.set_start_method('spawn')
 model, preprocess = clip.load("ViT-B/32", device=device)
 
-ckpt_dir = "../OFA-large-caption"
-ofa_tokenizer = OFATokenizer.from_pretrained(ckpt_dir)
-ofa_model = OFAModel.from_pretrained(ckpt_dir, use_cache=False)
-ofa_model.to(device)
-ofa_model.eval()
+# ckpt_dir = "../ofa-large"
+# ofa_tokenizer = OFATokenizer.from_pretrained(ckpt_dir)
+# ofa_model = OFAModel.from_pretrained(ckpt_dir, use_cache=False)
+# ofa_model.to(device)
+# ofa_model.eval()
 
-mean, std = [0.5, 0.5, 0.5], [0.5, 0.5, 0.5]
-resolution = 256
-patch_resize_transform = transforms.Compose([
-    lambda image: image.convert("RGB"),
-    transforms.Resize((resolution, resolution), interpolation=Image.BICUBIC),
-    transforms.ToTensor(), 
-    transforms.Normalize(mean=mean, std=std)
-])
+# mean, std = [0.5, 0.5, 0.5], [0.5, 0.5, 0.5]
+# resolution = 256
+# patch_resize_transform = transforms.Compose([
+#     lambda image: image.convert("RGB"),
+#     transforms.Resize((resolution, resolution), interpolation=Image.BICUBIC),
+#     transforms.ToTensor(), 
+#     transforms.Normalize(mean=mean, std=std)
+# ])
 
-def generate_caption(image):
-    """Generate caption for an image using the OFA model."""
-    with torch.no_grad():
-        inputs = ofa_tokenizer("what does the image describe?", return_tensors="pt").to(device)
-        images = patch_resize_transform(image).unsqueeze(0).to(device)
-        outputs = ofa_model.generate(**inputs, patch_images=images)
-        caption = ofa_tokenizer.batch_decode(outputs, skip_special_tokens=True)[0]
-    return caption
+# def generate_caption(image):
+#     """Generate caption for an image using the OFA model."""
+#     with torch.no_grad():
+#         inputs = ofa_tokenizer("what does the image describe?", return_tensors="pt").to(device)
+#         images = patch_resize_transform(image).unsqueeze(0).to(device)
+#         outputs = ofa_model.generate(**inputs, patch_images=images)
+#         caption = ofa_tokenizer.batch_decode(outputs, skip_special_tokens=True)[0]
+#     return caption
 
 class TestDataset(Dataset):
-    def __init__(self, img_path, questions_path):
+    def __init__(self, img_path, questions_path, captions_path):
         df = pd.read_csv(questions_path)
+        self.captions = pd.read_csv(captions_path)
+        self.captions.set_index("id", inplace=True)
+
         self.img_path = img_path
         self.vocab={}
         i=0
@@ -67,10 +66,10 @@ class TestDataset(Dataset):
         image_path = self.df["image"][index]
         question = self.df["question"][index]
         selected_answer = self.df["answer"][index]
+        caption = self.captions.loc[image_path, "caption"]
        
         image_path = os.path.expanduser(os.path.join(self.img_path, image_path))
         img = Image.open(image_path).convert('RGB')
-        caption = generate_caption(img)
         img = preprocess(img)
         answer = torch.tensor(self.vocab[selected_answer])
         return {"img": img, "question": question, "answer": answer, "img_path" : self.df["image"][index], "caption": caption}

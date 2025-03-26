@@ -2,7 +2,7 @@
 from PIL import Image
 import requests
 import torch
-import torch. multiprocessing as mp
+# import torch. multiprocessing as mp
 import torch.nn as nn
 import clip
 from torchvision import transforms
@@ -16,7 +16,7 @@ from tqdm import tqdm
 import copy
 import random
 # from transformers import OFATokenizer, OFAModel
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+device = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
 
 class AverageMeter(object):
     """Computes and stores the average and current value"""
@@ -58,11 +58,43 @@ def source_hook(module: nn.LayerNorm, input, output):
 def target_hook(module, input, output):
     ln_params["target"] = torch.cat((module.weight.data.clone(), module.bias.data.clone()), dim=0)
 
+class CrossAttention(nn.Module):
+    def __init__(self, dim, num_heads=8, qkv_bias=False, attn_drop=0., proj_drop=0.):
+        super().__init__()
+        self.num_heads = num_heads
+        head_dim = dim // num_heads
+        self.scale = head_dim ** -0.5
+
+        self.q = nn.Linear(dim, dim, bias=qkv_bias)
+        self.k = nn.Linear(dim, dim, bias=qkv_bias)
+        self.v = nn.Linear(dim, dim, bias=qkv_bias)
+        self.attn_drop = nn.Dropout(attn_drop)
+        self.proj = nn.Linear(dim, dim)
+        self.proj_drop = nn.Dropout(proj_drop)
+
+    def forward(self, x, context):
+        B, N, C = x.shape
+        B, M, C = context.shape
+
+        q = self.q(x).reshape(B, N, self.num_heads, C // self.num_heads).permute(0, 2, 1, 3)
+        k = self.k(context).reshape(B, M, self.num_heads, C // self.num_heads).permute(0, 2, 3, 1)
+        v = self.v(context).reshape(B, M, self.num_heads, C // self.num_heads).permute(0, 2, 1, 3)
+
+        attn = (q @ k) * self.scale
+        attn = attn.softmax(dim=-1)
+        attn = self.attn_drop(attn)
+
+        x = (attn @ v).transpose(1, 2).reshape(B, N, C)
+        x = self.proj(x)
+        x = self.proj_drop(x)
+        return x
+
 class TransferModel(nn.Module):
-    def __init__(self,num_classes=1000, caption_embedding_dim=128):
+    def __init__(self,num_classes=1000, caption_embedding_dim=512, use_captions=True):
         super(TransferModel, self).__init__()
-        self.device = "cuda:1" if torch.cuda.is_available() else "cpu"
-        self.model, self.preprocess = clip.load("ViT-B/32", device=self.device)
+        # self.device = "cuda:1" if torch.cuda.is_available() else "cpu"
+        self.use_captions = use_captions
+        self.model, self.preprocess = clip.load("ViT-B/32", device=device)
         self.model.float()
 
         self.source_ln = copy.deepcopy(self.model.ln_final)
@@ -84,73 +116,78 @@ class TransferModel(nn.Module):
         self.target_model.ln_final = self.target_ln
 
         text_hidden_size = self.model.text_projection.shape[1]
-        self.caption_projectors = [nn.Linear(caption_embedding_dim, text_hidden_size) for i in range(3)]
-        # self.total_layers = len(self.model.transformer.resblocks)
-        # self.layers_to_modify = sorted(random.sample(range(self.total_layers), 3))
-        self.layers_to_modify = [3, 6, 9]
+        self.orig_seq_length = 77
+        
+        # Replace caption projectors with cross-attention modules
+        self.cross_attentions = nn.ModuleList([
+            CrossAttention(dim=text_hidden_size, num_heads=8) for _ in range(3)
+        ])
 
-        self.classifier = nn.Linear(1024,num_classes)
+        self.layers_to_modify = [3, 6, 9]
+        self.classifier = nn.Linear(1024, num_classes)
 
     def embed_caption(self, caption):
         """Embed the caption into the same dimensionality"""
-        tokens = clip.tokenize(caption).to(self.device)
+        tokens = clip.tokenize(caption).to(device)
         with torch.no_grad():
             caption_embeddings = self.model.encode_text(tokens)
             caption_embeddings = caption_embeddings / caption_embeddings.norm(dim=-1, keepdim=True)
-        return caption_embeddings
-
+        return caption_embeddings.to(device)
 
     def forward(self, image, text, caption_embeddings):
         if "source" in text:
-            inputs1 = clip.tokenize(text["source"]).to(self.device)
-            image_features1 = self.source_model.encode_image(image["source"].to(self.device))
+            inputs1 = clip.tokenize(text["source"]).to(device)
+            image_features1 = self.source_model.encode_image(image["source"].to(device))
+            if(self.use_captions):
+                text_encoder1 = self.source_model.transformer
+                text_embedding1 = self.source_model.token_embedding(inputs1)
+                position_embedding1 = self.source_model.positional_embedding[: text_embedding1.size(1), :]
+                
+                x = text_embedding1 + position_embedding1
+                x = x.permute(1, 0, 2)
+                caption_idx = 0
 
-            text_encoder1 = self.source_model.transformer
-            text_embedding1 = self.source_model.token_embedding(inputs1)
-            position_embedding1 = self.source_model.positional_embedding[: text_embedding1.size(1), :]
+                for i, layer in enumerate(text_encoder1.resblocks):
+                    x = layer(x)
+                    if i in self.layers_to_modify:
+                        # Apply cross-attention between text and caption embeddings
+                        caption_emb = caption_embeddings["source"].unsqueeze(1)  # Add sequence dimension
+                        x = self.cross_attentions[caption_idx](x, caption_emb)
+                        caption_idx += 1
 
-            
-            x = text_embedding1 + position_embedding1
-            x = x.permute(1, 0, 2)
-            caption_idx = 0
-            # text_features1 = self.source_model.encode_text(inputs1)
-
-            for i, layer in enumerate(text_encoder1.resblocks):
-                x = layer(x)
-                if i in self.layers_to_modify:
-                    caption_embeddings_projected = self.caption_projectors[caption_idx](caption_embeddings).unsqueeze(0)
-                    x = torch.cat([x, caption_embeddings_projected], dim=0)
-                    caption_idx += 1
-
-            x = x.permute(1, 0, 2)
-            x = self.source_model.ln_final(x)  
-            text_features1 = x[torch.arange(x.shape[0]), inputs1.argmax(dim=-1)]  
-            text_features1 = text_features1 / text_features1.norm(dim=-1, keepdim=True)
+                x = x.permute(1, 0, 2)
+                x = self.source_model.ln_final(x)  
+                text_features1 = x[torch.arange(x.shape[0]), inputs1.argmax(dim=-1)]
+                text_features1 = text_features1 / text_features1.norm(dim=-1, keepdim=True)
+            else:
+                text_features1 = self.source_model.encode_text(inputs1)
 
         if "target" in text:
-            inputs2 = clip.tokenize(text["target"]).to(self.device)
-            image_features2 = self.target_model.encode_image(image["target"].to(self.device))
-            text_encoder2 = self.target_model.transformer
-            text_embedding2 = self.target_model.token_embedding(inputs2)
-            position_embedding2 = self.target_model.positional_embedding[: text_embedding2.size(1), :]
+            inputs2 = clip.tokenize(text["target"]).to(device)
+            image_features2 = self.target_model.encode_image(image["target"].to(device))
+            if(self.use_captions):
+                text_encoder2 = self.target_model.transformer
+                text_embedding2 = self.target_model.token_embedding(inputs2)
+                position_embedding2 = self.target_model.positional_embedding[: text_embedding2.size(1), :]
+                
+                x = text_embedding2 + position_embedding2
+                x = x.permute(1, 0, 2)
+                caption_idx = 0
 
-            
-            x = text_embedding2 + position_embedding2
-            x = x.permute(1, 0, 2)
-            # text_features1 = self.source_model.encode_text(inputs1)
-            caption_idx = 0
+                for i, layer in enumerate(text_encoder2.resblocks):
+                    x = layer(x)
+                    if i in self.layers_to_modify:
+                        # Apply cross-attention between text and caption embeddings
+                        caption_emb = caption_embeddings["target"].unsqueeze(1)  # Add sequence dimension
+                        x = self.cross_attentions[caption_idx](x, caption_emb)
+                        caption_idx += 1
 
-            for i, layer in enumerate(text_encoder2.resblocks):
-                x = layer(x)
-                if i in self.layers_to_modify:
-                    caption_embeddings_projected = self.caption_projectors[caption_idx](caption_embeddings).unsqueeze(0)
-                    x = torch.cat([x, caption_embeddings_projected], dim=0)
-                    caption_idx += 1
-
-            x = x.permute(1, 0, 2)
-            x = self.target_model.ln_final(x)  
-            text_features2 = x[torch.arange(x.shape[0]), inputs2.argmax(dim=-1)]  
-            text_features2 = text_features2 / text_features2.norm(dim=-1, keepdim=True)
+                x = x.permute(1, 0, 2)
+                x = self.target_model.ln_final(x)  
+                text_features2 = x[torch.arange(x.shape[0]), inputs2.argmax(dim=-1)]  
+                text_features2 = text_features2 / text_features2.norm(dim=-1, keepdim=True)
+            else:
+                text_features2 = self.target_model.encode_text(inputs2)
         
         if ("source" in text) and ("target" in text):
             image_features = torch.cat((image_features1, image_features2), dim=0)
@@ -177,7 +214,7 @@ def main():
     batch_size=128
     num_workers=4
     lr =1e-3
-    epochs = 50
+    epochs = 20
     momentum = 0.99
     image_size = 224
 
@@ -187,16 +224,13 @@ def main():
 
     train_dataset = TrainDataset('data/vqa_v2','train')
     val_dataset = TrainDataset('data/vqa_v2','val')
-    train_targ_dataset = TestDataset('data/test/images', 'data/test/train_questions.csv')
-    test_targ_dataset = TestDataset('data/test/images', 'data/test/test_questions.csv')
+    train_targ_dataset = TestDataset('data/test/images', 'data/test/train_questions.csv', 'data/test/captions.csv')
+    test_targ_dataset = TestDataset('data/test/images', 'data/test/test_questions.csv', 'data/test/captions.csv')
 
     train_loader = DataLoader(train_dataset, num_workers=num_workers, batch_size=int(batch_size*0.75), shuffle=False)
     train_targ_loader = DataLoader(train_targ_dataset, num_workers=num_workers, batch_size=int(batch_size*0.25), shuffle=False)
     val_loader = DataLoader(val_dataset, num_workers=num_workers, batch_size=batch_size, shuffle=False)
     # cross_loader = DataLoader(cross_dataset, num_workers=num_workers, batch_size=batch_size, shuffle=False)
-
-    train_loader_itr = iter(train_loader)
-    train_targ_loader_itr = iter(train_targ_loader)
 
     def mixed_data_loader(loader1, loader2):
         while True:
@@ -221,7 +255,19 @@ def main():
 
     transfer_model = TransferModel()
 
-    transfer_model = transfer_model.to('cuda:1')
+    transfer_model = transfer_model.to(device)
+    state_dict = torch.load('./captions_clip_vqa_v2.pth', map_location=device)
+    transfer_model.load_state_dict(state_dict)
+
+    for param in transfer_model.parameters():
+        param.requires_grad = False
+    for caption_projector in transfer_model.cross_attentions:
+        for param in caption_projector.parameters():
+            param.requires_grad = True
+    
+    for param in transfer_model.classifier.parameters():
+        param.requires_grad = True
+            
     optimizer = AdamW(transfer_model.parameters(), lr=lr)
 
     optimizer.zero_grad()
@@ -239,6 +285,10 @@ def main():
         transfer_model.train()
         train_loss_meter.reset()
         train_accuracy_meter.reset()
+
+        train_loader_itr = iter(train_loader)
+        train_targ_loader_itr = iter(train_targ_loader)
+        
         mixed_loader = mixed_data_loader(train_loader_itr, train_targ_loader_itr)
 
         for data in tqdm(mixed_loader):
@@ -249,8 +299,8 @@ def main():
             # captions["source"] = [transfer_model.generate_caption(image) for image in img["source"]]
             # captions["target"] = [transfer_model.generate_caption(image) for image in img["target"]]
             
-            captions["source"] = [transfer_model.embed_caption(caption) for caption in captions["source"]]
-            captions["target"] = [transfer_model.embed_caption(caption) for caption in captions["target"]]
+            captions["source"] = torch.stack([transfer_model.embed_caption(caption) for caption in captions["source"]]).to(device)
+            captions["target"] = torch.stack([transfer_model.embed_caption(caption) for caption in captions["target"]]).to(device)
 
             output = transfer_model(img, ques, captions)
             # print(output.shape)
@@ -281,11 +331,13 @@ def main():
             img = data["img"]
             ques = data["question"]
             ans = data["answer"].to('cuda:1')
+            captions = {"source": data["caption"]}
+            captions["source"] = torch.stack([transfer_model.embed_caption(caption) for caption in captions["source"]]).to(device)
 
             img =  {"source": img}
             ques = {"source": ques}
 
-            output = transfer_model(img,ques)
+            output = transfer_model(img,ques, captions)
             loss =  torch.nn.CrossEntropyLoss()(output,ans)
             val_loss_meter.update(loss.item(), ans.size(0))
             # Calculate and update validation accuracy
@@ -312,10 +364,10 @@ def main():
         # print(val_loss_meter.avg)
         print(f'Epoch: {i+1}, Validation Loss: {val_loss_meter.avg:.4f}, Validation Accuracy: {val_accuracy_meter.avg:.2f} ')
         if best_val_acc< val_accuracy_meter.avg:
-            torch.save(transfer_model.state_dict(), './clip_vqa_v2.pth')
+            torch.save(transfer_model.state_dict(), './captions_clip.pth')
             best_val_acc = val_accuracy_meter.avg
             print("Model Saved!!!")
 
 if __name__ == "__main__": 
-    mp.set_start_method("spawn", force=True)
+    # mp.set_start_method("spawn", force=True)
     main()

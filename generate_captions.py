@@ -5,9 +5,10 @@ import json
 from PIL import Image
 import torch
 from torchvision import transforms
+from tqdm import tqdm
 
 device = "cuda:1" if torch.cuda.is_available() else "cpu"
-ckpt_dir = "../OFA-large-caption"
+ckpt_dir = "../ofa-large"
 ofa_tokenizer = OFATokenizer.from_pretrained(ckpt_dir)
 ofa_model = OFAModel.from_pretrained(ckpt_dir, use_cache=False)
 ofa_model.to(device)
@@ -50,17 +51,42 @@ def generate_train_captions(root, subset):
         data = json.load(f)
     df = pd.DataFrame(data["questions"])
     image_paths = df["image_id"].apply(
-        lambda x: f"{IMAGE_PATH[subset]["img_folder"]}/COCO_{IMAGE_PATH[subset]["img_folder"]}_{x:012d}.jpg")
+        lambda x: (x, f"{IMAGE_PATH[subset]["img_folder"]}/COCO_{IMAGE_PATH[subset]["img_folder"]}_{x:012d}.jpg"))
     
     captions = []
-    for image_path in image_paths:
+    for image_tup in tqdm(list(set(image_paths))):
+        (img_id, image_path) = image_tup
         img = Image.open(os.path.expanduser(os.path.join(root, image_path))).convert('RGB')
         caption = generate_caption(img)
-        captions.append(caption)
+        captions.append({"caption" : caption, "id" : img_id})
     
-    df["caption"] = captions
+    caption_df = pd.DataFrame(captions)
 
-    df.to_csv(data["questions"])
+    caption_df.to_csv(os.path.expanduser(os.path.join(root, f"captions_{subset}.csv")))
 
-generate_train_captions('data/vqa_v2','train')
-generate_train_captions('data/vqa_v2','val')
+def generate_test_captions(root_path, save_path):
+    
+    image_extensions = {'.jpg', '.jpeg', '.png', '.gif', '.bmp'}
+    captions = []
+    for filename in tqdm(os.listdir(root_path)):
+        full_path = os.path.join(root_path, filename)
+        # Check if it is a file and has a valid image extension
+        if os.path.isfile(full_path):
+            ext = os.path.splitext(filename)[1].lower()
+            if ext in image_extensions:
+                try:
+                    # Open the image and append it to the list
+                    img = Image.open(full_path)
+                    caption = generate_caption(img)
+                    captions.append({"caption" : caption, "id" : filename})
+                except Exception as e:
+                    print(f"Error opening {filename}: {e}")
+    
+    caption_df = pd.DataFrame(captions)
+    caption_df.to_csv(save_path)
+
+if __name__ == "__main__" :
+    # generate_train_captions('data/vqa_v2','train')
+    # generate_train_captions('data/vqa_v2','val')
+    generate_test_captions('data/test/images', 'data/test/captions.csv')
+    

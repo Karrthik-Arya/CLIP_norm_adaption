@@ -5,12 +5,12 @@ from PIL import Image
 import json
 import torch
 import torch.nn.functional as F
-import torch. multiprocessing as mp
+# import torch. multiprocessing as mp
 import numpy as np
 import re
 from tqdm import tqdm
 import clip
-from transformers import OFATokenizer, OFAModel
+# from transformers import OFATokenizer, OFAModel
 from torchvision import transforms
 
 def most_common_from_dict(dct):
@@ -19,30 +19,30 @@ def most_common_from_dict(dct):
 
 device = "cuda:1" if torch.cuda.is_available() else "cpu"
 model, preprocess = clip.load("ViT-B/32", device=device)
-ckpt_dir = "../OFA-large-caption"
-ofa_tokenizer = OFATokenizer.from_pretrained(ckpt_dir)
-ofa_model = OFAModel.from_pretrained(ckpt_dir, use_cache=False)
-ofa_model.to(device)
-ofa_model.eval()
+# ckpt_dir = "../ofa-large"
+# ofa_tokenizer = OFATokenizer.from_pretrained(ckpt_dir)
+# ofa_model = OFAModel.from_pretrained(ckpt_dir, use_cache=False)
+# ofa_model.to(device)
+# ofa_model.eval()
 
 
-mean, std = [0.5, 0.5, 0.5], [0.5, 0.5, 0.5]
-resolution = 256
-patch_resize_transform = transforms.Compose([
-    lambda image: image.convert("RGB"),
-    transforms.Resize((resolution, resolution), interpolation=Image.BICUBIC),
-    transforms.ToTensor(), 
-    transforms.Normalize(mean=mean, std=std)
-])
+# mean, std = [0.5, 0.5, 0.5], [0.5, 0.5, 0.5]
+# resolution = 256
+# patch_resize_transform = transforms.Compose([
+#     lambda image: image.convert("RGB"),
+#     transforms.Resize((resolution, resolution), interpolation=Image.BICUBIC),
+#     transforms.ToTensor(), 
+#     transforms.Normalize(mean=mean, std=std)
+# ])
 
-def generate_caption(image):
-    """Generate caption for an image using the OFA model."""
-    with torch.no_grad():
-        inputs = ofa_tokenizer("what does the image describe?", return_tensors="pt").to(device)
-        images = patch_resize_transform(image).unsqueeze(0).to(device)
-        outputs = ofa_model.generate(**inputs, patch_images=images)
-        caption = ofa_tokenizer.batch_decode(outputs, skip_special_tokens=True)[0]
-    return caption
+# def generate_caption(image):
+#     """Generate caption for an image using the OFA model."""
+#     with torch.no_grad():
+#         inputs = ofa_tokenizer("what does the image describe?", return_tensors="pt").to(device)
+#         images = patch_resize_transform(image).unsqueeze(0).to(device)
+#         outputs = ofa_model.generate(**inputs, patch_images=images)
+#         caption = ofa_tokenizer.batch_decode(outputs, skip_special_tokens=True)[0]
+#     return caption
 
 def preprocessing(text):
   input_text = text
@@ -99,6 +99,8 @@ class TrainDataset(Dataset):
         self.root = root
         self.transform = transform
         self.selection = most_common_from_dict
+        self.captions = pd.read_csv(os.path.expanduser(os.path.join(root, f"captions_{subset}.csv")))
+        self.captions.set_index('id', inplace=True)
         q_path = os.path.expanduser(os.path.join(root, self.IMAGE_PATH[subset]["questions"]))
 
         with open(q_path, 'r') as f:
@@ -107,6 +109,10 @@ class TrainDataset(Dataset):
         df = pd.DataFrame(data["questions"])
         df["image_path"] = df["image_id"].apply(
                 lambda x: f"{self.IMAGE_PATH[subset]["img_folder"]}/COCO_{self.IMAGE_PATH[subset]["img_folder"]}_{x:012d}.jpg")
+        
+        df["caption"] = df["image_id"].apply(
+            lambda x: self.captions.loc[x, "caption"]
+        )
         path = os.path.expanduser(os.path.join(root, self.IMAGE_PATH[subset]['answers']))
         with open(path, 'r') as f:
                     data = json.load(f)
@@ -141,11 +147,10 @@ class TrainDataset(Dataset):
     def __getitem__(self, index):
         image_path = self.df["image_path"][index]
         question = self.df["question"][index]
+        caption = self.df["caption"][index]
         selected_answers = preprocessing(self.selection(self.df["answers"][index]))
-       
         image_path = os.path.expanduser(os.path.join(self.root, image_path))
         img = Image.open(image_path).convert('RGB')
-        caption = generate_caption(img)
         img = preprocess(img)
         answer = torch.tensor(self.vocab[selected_answers])
         return {"img": img, "question": question, "answer": answer, "caption": caption}
