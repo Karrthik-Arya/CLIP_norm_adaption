@@ -71,23 +71,56 @@ class CrossAttention(nn.Module):
         self.attn_drop = nn.Dropout(attn_drop)
         self.proj = nn.Linear(dim, dim)
         self.proj_drop = nn.Dropout(proj_drop)
+        
+        # Add layer normalization
+        self.norm1 = nn.LayerNorm(dim)
+        self.norm2 = nn.LayerNorm(dim)
 
     def forward(self, x, context):
-        B, N, C = x.shape
-        B, M, C = context.shape
+        # x shape: [seq_len, batch_size, dim]
+        # context shape: [batch_size, dim]
+        seq_len, batch_size, dim = x.shape
+        
+        # First layer norm
+        x_norm = self.norm1(x)
+        
+        # Reshape context to [batch_size, 1, dim]
+        if len(context.shape) == 2:
+            context = context.unsqueeze(1)
+        
+        # Project and reshape queries
+        q = self.q(x_norm).permute(1, 0, 2)  # [batch_size, seq_len, dim]
+        q = q.reshape(batch_size, seq_len, self.num_heads, dim // self.num_heads)
+        q = q.permute(0, 2, 1, 3)  # [batch_size, num_heads, seq_len, head_dim]
+        
+        # Project and reshape keys
+        k = self.k(context)  # [batch_size, 1, dim]
+        k = k.reshape(batch_size, 1, self.num_heads, dim // self.num_heads)
+        k = k.permute(0, 2, 3, 1)  # [batch_size, num_heads, head_dim, 1]
+        
+        # Project and reshape values
+        v = self.v(context)  # [batch_size, 1, dim]
+        v = v.reshape(batch_size, 1, self.num_heads, dim // self.num_heads)
+        v = v.permute(0, 2, 1, 3)  # [batch_size, num_heads, 1, head_dim]
 
-        q = self.q(x).reshape(B, N, self.num_heads, C // self.num_heads).permute(0, 2, 1, 3)
-        k = self.k(context).reshape(B, M, self.num_heads, C // self.num_heads).permute(0, 2, 3, 1)
-        v = self.v(context).reshape(B, M, self.num_heads, C // self.num_heads).permute(0, 2, 1, 3)
-
-        attn = (q @ k) * self.scale
+        # Compute attention scores
+        attn = (q @ k) * self.scale  # [batch_size, num_heads, seq_len, 1]
         attn = attn.softmax(dim=-1)
         attn = self.attn_drop(attn)
 
-        x = (attn @ v).transpose(1, 2).reshape(B, N, C)
-        x = self.proj(x)
-        x = self.proj_drop(x)
-        return x
+        # Apply attention to values
+        attn_out = (attn @ v).transpose(1, 2)  # [batch_size, seq_len, num_heads, head_dim]
+        attn_out = attn_out.reshape(batch_size, seq_len, dim)  # [batch_size, seq_len, dim]
+        attn_out = attn_out.permute(1, 0, 2)  # [seq_len, batch_size, dim]
+        
+        # Final projection and residual connection
+        attn_out = self.proj(attn_out)
+        attn_out = self.proj_drop(attn_out)
+        
+        # Second layer norm and residual connection
+        out = self.norm2(x + attn_out)
+        
+        return out
 
 class TransferModel(nn.Module):
     def __init__(self,num_classes=1000, caption_embedding_dim=512, use_captions=True):
@@ -150,9 +183,8 @@ class TransferModel(nn.Module):
                 for i, layer in enumerate(text_encoder1.resblocks):
                     x = layer(x)
                     if i in self.layers_to_modify:
-                        # Apply cross-attention between text and caption embeddings
-                        caption_emb = caption_embeddings["source"].unsqueeze(1)  # Add sequence dimension
-                        x = self.cross_attentions[caption_idx](x, caption_emb)
+                        # caption_embeddings["source"] shape is [B, D]
+                        x = self.cross_attentions[caption_idx](x, caption_embeddings["source"])
                         caption_idx += 1
 
                 x = x.permute(1, 0, 2)
@@ -177,9 +209,8 @@ class TransferModel(nn.Module):
                 for i, layer in enumerate(text_encoder2.resblocks):
                     x = layer(x)
                     if i in self.layers_to_modify:
-                        # Apply cross-attention between text and caption embeddings
-                        caption_emb = caption_embeddings["target"].unsqueeze(1)  # Add sequence dimension
-                        x = self.cross_attentions[caption_idx](x, caption_emb)
+                        # caption_embeddings["target"] shape is [B, D]
+                        x = self.cross_attentions[caption_idx](x, caption_embeddings["target"])
                         caption_idx += 1
 
                 x = x.permute(1, 0, 2)
@@ -213,11 +244,12 @@ class TransferModel(nn.Module):
 def main():
     batch_size=128
     num_workers=4
-    lr =1e-3
+    base_lr = 1e-4  # Reduced base learning rate
     epochs = 20
     momentum = 0.99
     image_size = 224
-
+    warmup_epochs = 2
+    max_grad_norm = 1.0  # For gradient clipping
 
     mean = (0.485, 0.456, 0.406)
     std = (0.229, 0.224, 0.225)
@@ -254,10 +286,8 @@ def main():
             yield mixed_batch
 
     transfer_model = TransferModel()
-
+    # transfer_model.load_state_dict(torch.load('./captions_clip.pth', map_location=device))
     transfer_model = transfer_model.to(device)
-    state_dict = torch.load('./captions_clip_vqa_v2.pth', map_location=device)
-    transfer_model.load_state_dict(state_dict)
 
     for param in transfer_model.parameters():
         param.requires_grad = False
@@ -268,19 +298,24 @@ def main():
     for param in transfer_model.classifier.parameters():
         param.requires_grad = True
             
-    optimizer = AdamW(transfer_model.parameters(), lr=lr)
+    optimizer = AdamW(transfer_model.parameters(), lr=base_lr, weight_decay=0.01)
 
-    optimizer.zero_grad()
+    # Learning rate scheduler with warmup
+    def get_lr(epoch):
+        if epoch < warmup_epochs:
+            return base_lr * (epoch + 1) / warmup_epochs
+        return base_lr
 
     train_loss_meter = AverageMeter()
     val_loss_meter = AverageMeter()
-    # cross_loss_meter = AverageMeter()
     train_accuracy_meter = AverageMeter()
     val_accuracy_meter = AverageMeter()
-    # cross_accuracy_meter = AverageMeter()
     best_val_acc = 0
 
     for i in range(epochs):
+        # Update learning rate
+        for param_group in optimizer.param_groups:
+            param_group['lr'] = get_lr(i)
 
         transfer_model.train()
         train_loss_meter.reset()
@@ -294,77 +329,63 @@ def main():
         for data in tqdm(mixed_loader):
             img = data["img"]
             ques = data["question"]
-            ans = data["answer"].to('cuda:1')
+            ans = data["answer"].to(device)
             captions = data["caption"]
-            # captions["source"] = [transfer_model.generate_caption(image) for image in img["source"]]
-            # captions["target"] = [transfer_model.generate_caption(image) for image in img["target"]]
             
             captions["source"] = torch.stack([transfer_model.embed_caption(caption) for caption in captions["source"]]).to(device)
             captions["target"] = torch.stack([transfer_model.embed_caption(caption) for caption in captions["target"]]).to(device)
 
             output = transfer_model(img, ques, captions)
-            # print(output.shape)
-            # print(ans.shape)
-            # print(ans)
+            
             cosine_sim = F.cosine_similarity(ln_params['source'], ln_params['target'], dim=0)
             cosine_loss = -cosine_sim.mean()
 
-            loss =  torch.nn.CrossEntropyLoss()(output[:len(ques['source'])],ans[:len(ques['source'])])
+            loss = torch.nn.CrossEntropyLoss()(output[:len(ques['source'])], ans[:len(ques['source'])])
             probs = F.softmax(output[len(ques['source']):], dim=-1)
             self_entropy = -torch.sum(probs * torch.log(probs + 1e-9), dim=-1).mean()
-            loss +=  self_entropy
+            loss += self_entropy
             loss += cosine_loss
                 
             train_loss_meter.update(loss.item(), ans.size(0))
-            # Calculate and update accuracy
             acc1 = accuracy(output, ans, topk=(1,))
             train_accuracy_meter.update(acc1[0].item(), ans.size(0))
-            loss.backward()
-            optimizer.step()
+            
             optimizer.zero_grad()
-            # break
+            loss.backward()
+            
+            # Gradient clipping
+            torch.nn.utils.clip_grad_norm_(transfer_model.parameters(), max_grad_norm)
+            
+            optimizer.step()
+
         print(f'Epoch: {i+1}, Training Loss: {train_loss_meter.avg:.4f}, Training Accuracy: {train_accuracy_meter.avg:.2f} ')
+        
+        # Validation
         transfer_model.eval()
         val_loss_meter.reset()
         val_accuracy_meter.reset()
-        for data in tqdm(val_loader):
-            img = data["img"]
-            ques = data["question"]
-            ans = data["answer"].to('cuda:1')
-            captions = {"source": data["caption"]}
-            captions["source"] = torch.stack([transfer_model.embed_caption(caption) for caption in captions["source"]]).to(device)
+        
+        with torch.no_grad():
+            for data in tqdm(val_loader):
+                img = data["img"]
+                ques = data["question"]
+                ans = data["answer"].to(device)
+                captions = {"source": data["caption"]}
+                captions["source"] = torch.stack([transfer_model.embed_caption(caption) for caption in captions["source"]]).to(device)
 
-            img =  {"source": img}
-            ques = {"source": ques}
+                img = {"source": img}
+                ques = {"source": ques}
 
-            output = transfer_model(img,ques, captions)
-            loss =  torch.nn.CrossEntropyLoss()(output,ans)
-            val_loss_meter.update(loss.item(), ans.size(0))
-            # Calculate and update validation accuracy
-            acc1 = accuracy(output, ans, topk=(1,))
-            val_accuracy_meter.update(acc1[0].item(), ans.size(0))
-            # break
-        # cross_loss_meter.reset()
-        # cross_accuracy_meter.reset()
-        # for data in tqdm(cross_loader):
-        #     img = data["img"]
-        #     ques = data["question"]
-        #     ans = data["answer"]
-        #     img,ans = img.to('cuda'),ans.to('cuda')
+                output = transfer_model(img, ques, captions)
+                loss = torch.nn.CrossEntropyLoss()(output, ans)
+                val_loss_meter.update(loss.item(), ans.size(0))
+                acc1 = accuracy(output, ans, topk=(1,))
+                val_accuracy_meter.update(acc1[0].item(), ans.size(0))
 
-        #     output = transfer_model(img,ques)
-
-        #     loss =  torch.nn.CrossEntropyLoss()(output,ans)
-        #     # cross_loss_meter.update(loss.item(), img.size(0))
-        #     # Calculate and update accuracy
-        #     acc1 = accuracy(output, ans, topk=(1,))
-            # cross_accuracy_meter.update(acc1[0].item(), img.size(0))
-            # break
-        # print(val_accuracy_meter.avg)
-        # print(val_loss_meter.avg)
         print(f'Epoch: {i+1}, Validation Loss: {val_loss_meter.avg:.4f}, Validation Accuracy: {val_accuracy_meter.avg:.2f} ')
-        if best_val_acc< val_accuracy_meter.avg:
-            torch.save(transfer_model.state_dict(), './captions_clip.pth')
+        
+        if best_val_acc < val_accuracy_meter.avg:
+            torch.save(transfer_model.state_dict(), './captions_clip1.pth')
             best_val_acc = val_accuracy_meter.avg
             print("Model Saved!!!")
 
